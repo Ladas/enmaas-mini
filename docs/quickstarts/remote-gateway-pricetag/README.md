@@ -60,6 +60,9 @@ ssh -t "${SSH_OPTS[@]}" "$RHEL_HOST" \
 ```
 
 Choose providers, enter their keys at hidden prompts, then confirm with `install`.
+Keep **Use tested published images** to install the **My keys** tabs, updated
+administration tables and impersonation confirmation dialog. Choose
+**Build latest demo branches** only to test newer source; see [image options](images.md).
 
 - **Providers:** OpenAI, an external OpenAI-compatible/Messages service, or both.
 - **Users:** admin is required; Alice/Bob are optional. Choose **Admin only** to
@@ -158,7 +161,8 @@ allowance is per user. View and change overrides
 in **Administration → User quota**; the [user helper](users.md) uses the same service API.
 For budget-denial testing, use the separate [mock quota probe](../../testing/pricetag-perf.md#usd-quota-probe).
 
-[Manual configuration, saved launcher and desktop app](clients.md).
+[Manual configuration and saved launcher](clients.md) ·
+[OpenCode Desktop setup](clients.md#opencode-desktop).
 
 <details markdown="1">
 <summary>What the harness helper does</summary>

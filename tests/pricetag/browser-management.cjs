@@ -36,13 +36,16 @@ async function done(page, action) {
     await page.locator('#api_key').fill(key);
     await Promise.all([page.waitForURL(url => url.pathname !== '/login'), page.getByRole('button', { name: 'Sign In', exact: true }).click()]);
     await page.goto(base + '/management');
-    await page.waitForFunction(() => document.querySelector('#identity')?.textContent.startsWith('Signed in as '));
+    await page.locator('#keyManagement').waitFor({state:'visible'});
+    await page.locator('#keys[aria-busy=false]').waitFor();
     return { page, context };
   }
   try {
     const { page: admin, context: adminContext } = await login(readKey('admin'));
+    await admin.getByRole('link', {name:'My team',exact:true}).waitFor();
     await admin.goto(base + '/admin');
     await admin.locator('#admin').waitFor({ state: 'visible' });
+    await admin.getByRole('link', {name:'My team',exact:true}).waitFor();
     await admin.locator('#user [name=subject]').fill('demo-ui-onboard');
     await admin.locator('#user [name=name]').fill('Demo UI Onboarding');
     await done(admin, () => admin.getByRole('button',{name:'Save user',exact:true}).click());
@@ -86,6 +89,7 @@ async function done(page, action) {
     await admin.locator('#onboardKey').getByRole('button', { name: 'Dismiss key', exact: true }).click();
     assert.equal(await admin.locator('#onboardKey').isVisible(), false);
     const { page: user, context: userContext } = await login(issued.key);user.on('dialog', dialog=>dialog.accept());
+    assert.equal(await user.getByRole('link', {name:'My team',exact:true}).count(),0);
     assert.equal(await user.locator('#admin').isVisible(), false);
     const statuses = await user.evaluate(async () => {
       const result = [];
@@ -95,16 +99,19 @@ async function done(page, action) {
       return result;
     });
     assert.deepEqual(statuses, [403, 403, 403, 403]);
-    await done(user, () => user.getByRole('button', { name: 'List my keys', exact: true }).click());
+    await done(user, () => user.getByRole('button', { name: 'Refresh', exact: true }).click());
     assert.ok(await user.locator('#keys button').count(), 'issued key absent from personal list');
+    await user.getByRole('tab', {name:'Create key',exact:true}).click();
     await user.locator('#key [name=name]').fill('demo-personal-key');
     await user.locator('#key [name=expiresIn]').fill('1d');
     await done(user, () => user.getByRole('button', { name: 'Create key', exact: true }).click());
     const personal = await downloadKey(user, '#newKey');
+    await user.getByRole('tab', {name:'My keys',exact:true}).click();
     assert.ok(personal.key, 'personal key missing');
-    await done(user, () => user.getByRole('button', { name: 'List my keys', exact: true }).click());
-    const row = user.locator('#keys p').filter({ hasText: personal.id });
+    await done(user, () => user.getByRole('button', { name: 'Refresh', exact: true }).click());
+    const row = user.locator('#keys tr[data-key-id="' + personal.id + '"]');
     await done(user, () => row.getByRole('button', { name: 'Revoke', exact: true }).click());
+    await user.locator('#keyState').selectOption('revoked');
     assert.equal(await row.locator('.key-status').textContent(), 'revoked');
     await userContext.close();
     await adminContext.close();
