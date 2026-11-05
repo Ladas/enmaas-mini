@@ -666,13 +666,15 @@ class SetupTest(unittest.TestCase):
                 elif isinstance(value, list):
                     for child in value:
                         yield from objects(child)
-            nodes = list(objects(config))
-            for alias, cluster, path in (
-                    ('openai/gpt-6-luna', 'openai', '/v1/responses'),
-                    ('pricetag/gpt-6-luna', 'pricetag-openai', '/v1/responses'),
-                    ('pricetag/claude-sonnet-5-5', 'pricetag-anthropic', '/v1/messages')):
-                self.assertIn({'path': path, 'headers': {'X-Gateway-Model': alias},
-                               'cluster': cluster}, nodes)
+            for api, alias, cluster, path in (
+                    ('openai', 'openai/gpt-6-luna', 'openai', '/v1/responses'),
+                    ('openai', 'pricetag/gpt-6-luna', 'pricetag-openai', '/v1/responses'),
+                    ('anthropic', 'pricetag/claude-sonnet-5-5', 'pricetag-anthropic', '/v1/messages')):
+                chain = next(c for c in config['filter_chains'] if c['name'] == api)
+                nodes = list(objects(chain))
+                self.assertIn({'kind': 'inference_model', 'name': alias,
+                               'site': 'single-server', 'cluster': cluster}, nodes)
+                self.assertIn({'unless': {'path': path}}, nodes)
                 self.assertTrue(any(
                     node.get('request_replace') == [{'pointer': '/model', 'value': alias.split('/', 1)[1]}]
                     and node.get('conditions') == [{'when': {'methods': ['POST'],
