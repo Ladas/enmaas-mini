@@ -28,7 +28,8 @@ def client_command(environment_file, command='SELECT 1'):
 
 def psql(environment_file, command='SELECT 1'):
     arguments = client_command(environment_file, command)
-    return subprocess.run(arguments, check=True, text=True, stdout=subprocess.PIPE).stdout.strip()
+    return subprocess.run(arguments, check=True, text=True, stdout=subprocess.PIPE,
+                          cwd='/tmp').stdout.strip()
 
 
 def main():

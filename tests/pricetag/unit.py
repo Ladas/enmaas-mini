@@ -234,6 +234,17 @@ class PreparationTest(unittest.TestCase):
         self.assertNotIn('PGPASSWORD=', rendered_command)
         self.assertNotIn('p@ss/word', rendered_command)
 
+    def test_external_database_client_runs_outside_inaccessible_checkout(self):
+        result = type('Result', (), {'stdout': '1\n'})()
+        with patch.object(external_database, 'service_prefix', return_value=['sudo']), \
+                patch.object(external_database.subprocess, 'run', return_value=result) as execute:
+            self.assertEqual(external_database.psql(Path('/etc/praxis-pricetag/external-maas-db.env')), '1')
+        self.assertEqual(execute.call_args.kwargs['cwd'], '/tmp')
+
+    def test_unmanaged_mock_provider_supports_capacity_backlog(self):
+        source = (ROOT / 'tests/pricetag/provider.py').read_text()
+        self.assertIn("if managed else Provider(host='0.0.0.0', local=True, request_backlog=512)", source)
+
     def test_gateway_quadlet_keeps_required_lines_without_provider_secrets(self):
         body = prepare.gateway_quadlet_body('sha256:' + 'a' * 64, [], 'Volume=/tmp/pricetag-fixture:/etc/praxis:ro,Z\n', True)
         for required in ('Image=sha256:', 'Pull=never', 'NetworkAlias=pricetag-gateway',

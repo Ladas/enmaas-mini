@@ -326,7 +326,7 @@ def main():
             f'MemoryMax={memory}\n\n[Install]\nWantedBy=default.target\n')
 
     database_dependency = '' if external_database else 'pricetag-db.service'
-    application_dependency = database_dependency or 'network-online.target'
+    application_dependency = database_dependency or 'pricetag-network.service'
     external_ca_mount = (f'Volume={args.directory}/external-ca.crt:/etc/pricetag-external-ca.crt:ro\n'
                          if external_database and ca_configured else '')
     if external_database is None:
