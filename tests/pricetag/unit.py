@@ -210,7 +210,7 @@ class PreparationTest(unittest.TestCase):
             'PGHOST': 'db.example', 'PGPORT': '5432', 'PGUSER': 'maas',
             'PGDATABASE': 'maas', 'PGSSLMODE': 'require'})
         self.assertEqual(prepare.external_password_file('p@ss/word\nnext line'),
-                         "PGPASSWORD='p@ss/word\nnext line'\n")
+                         "export PGPASSWORD='p@ss/word\nnext line'\n")
         rendered = prepare.external_application_url(url, False)
         self.assertIn('p%40ss%2Fword@db.example:5432/maas', rendered)
         self.assertIn('application_name=test', rendered)

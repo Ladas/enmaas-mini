@@ -156,7 +156,7 @@ def external_client_environment(url_text, expected_database, ca_configured):
 def external_password_file(password):
     if '\x00' in password:
         raise ValueError('external database password must not contain a NUL byte')
-    return 'PGPASSWORD=' + shlex.quote(password) + '\n'
+    return 'export PGPASSWORD=' + shlex.quote(password) + '\n'
 
 
 def gateway_quadlet_body(image, provider_secrets, mount, mock_provider):
