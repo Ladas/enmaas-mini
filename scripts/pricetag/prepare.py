@@ -101,8 +101,9 @@ def validate_external_database_url(url_text, ca_file=None, ca_required=True):
 
 def external_application_url(url_text, ca_configured):
     config = validate_external_database_url(url_text, ca_required=False)
-    query = [(key, value) for key, value in parse_qsl(urlsplit(url_text).query,
-                                                       keep_blank_values=True)
+    query = [(key, value.lower() if key == 'sslmode' else value)
+             for key, value in parse_qsl(urlsplit(url_text).query,
+                                         keep_blank_values=True)
              if key != 'sslrootcert']
     if ca_configured:
         query.append(('sslrootcert', '/etc/pricetag-external-ca.crt'))
@@ -225,6 +226,20 @@ def main():
     if not needed <= supplied:
         parser.error('provider Quadlet does not supply every required API-key secret')
     provider_secrets = [line for line in provider_secrets if line.rsplit('=', 1)[1] in needed]
+    external_database = None
+    if args.maas_database_url_file is not None:
+        try:
+            maas_url = args.maas_database_url_file.read_text().strip()
+            metering_url = args.metering_database_url_file.read_text().strip()
+            external_database = {
+                'maas': validate_external_database_url(maas_url, args.external_database_ca_file),
+                'metering': validate_external_database_url(metering_url, args.external_database_ca_file),
+            }
+            if (external_database['maas']['host'], external_database['maas']['port']) != \
+                    (external_database['metering']['host'], external_database['metering']['port']):
+                raise ValueError('external maas and metering URLs must use the same database server address and port')
+        except (OSError, ValueError) as error:
+            parser.error(str(error))
     os.umask(0o077)
     args.admin_directory.mkdir(mode=0o700)
     args.directory.mkdir(mode=0o750)
@@ -244,20 +259,6 @@ def main():
         shutil.copyfile(source, bundle / target)
     (bundle / 'gateway.json').write_text(json.dumps(config, indent=2) + '\n')
     shutil.copyfile(args.admin_directory / 'tls/ca.pem', args.directory / 'ca.pem')
-    external_database = None
-    if args.maas_database_url_file is not None:
-        try:
-            maas_url = args.maas_database_url_file.read_text().strip()
-            metering_url = args.metering_database_url_file.read_text().strip()
-            external_database = {
-                'maas': validate_external_database_url(maas_url, args.external_database_ca_file),
-                'metering': validate_external_database_url(metering_url, args.external_database_ca_file),
-            }
-            if (external_database['maas']['host'], external_database['maas']['port']) != \
-                    (external_database['metering']['host'], external_database['metering']['port']):
-                raise ValueError('external maas and metering URLs must use the same database server address and port')
-        except (OSError, ValueError) as error:
-            parser.error(str(error))
     if external_database is None:
         postgres_password, metering_password, maas_password = (
             secrets.token_urlsafe(32) for _ in range(3))

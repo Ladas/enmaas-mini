@@ -213,6 +213,18 @@ class PreparationTest(unittest.TestCase):
         self.assertIn('p%40ss%2Fword@db.example:5432/maas', rendered)
         self.assertIn('application_name=test', rendered)
 
+    def test_external_application_url_normalizes_sslmode_case(self):
+        rendered = prepare.external_application_url(
+            'postgresql://maas:secret@db.example:5432/maas?sslmode=VERIFY-FULL', False)
+        self.assertIn('sslmode=verify-full', rendered)
+
+    def test_external_database_urls_are_validated_before_output_directories(self):
+        source = prepare.__file__
+        text = Path(source).read_text()
+        validation = text.index('external_database = None')
+        output = text.index('args.admin_directory.mkdir')
+        self.assertLess(validation, output)
+
     def test_external_database_certificate_mode_requires_matching_ca_configuration(self):
         url = 'postgresql://maas:secret@db.example:5432/maas?sslmode=verify-full'
         with self.assertRaises(ValueError):
