@@ -9,6 +9,8 @@ import pwd
 import subprocess
 import time
 
+ROOT = Path(__file__).resolve().parents[2]
+DEPLOY = Path('/etc/praxis-pricetag')
 SERVICES = ['pricetag-' + name for name in ('gateway', 'maas', 'metering', 'db', 'provider')]
 SQL = """
 SET statement_timeout = '10s';
@@ -63,20 +65,29 @@ def sample(prefix):
               'cpu_ticks': list(map(int, Path('/proc/stat').read_text().splitlines()[0].split()[1:])),
               'pressure': {name: Path('/proc/pressure', name).read_text().strip()
                            for name in ('cpu', 'memory', 'io') if Path('/proc/pressure', name).exists()}}
-    record['containers'] = command(prefix + ['podman', 'stats', '--no-stream', '--format', 'json', *SERVICES], True)
-    record['services'] = command(prefix + ['systemctl', '--user', 'show', *[s + '.service' for s in SERVICES],
+    external_database = (DEPLOY / 'external-maas-db.env').is_file()
+    observed_services = [service for service in SERVICES
+                         if not external_database or service != 'pricetag-db']
+    record['containers'] = command(prefix + ['podman', 'stats', '--no-stream', '--format', 'json',
+                                             *observed_services], True)
+    record['services'] = command(prefix + ['systemctl', '--user', 'show',
+                                             *[service + '.service' for service in observed_services],
         '--property=Id,ActiveState,NRestarts,MemoryCurrent,MemoryPeak,CPUUsageNSec,TasksCurrent,Result'])
-    database_user = 'postgres'
-    probe = prefix + ['podman', 'exec', 'pricetag-db', 'psql', '-X', '-qAt',
-        '-U', database_user, '-d', 'metering', '-c', 'SELECT 1']
-    if command(probe) != '1':
-        database_user = 'metering'
-    record['postgres'] = command(prefix + ['podman', 'exec', 'pricetag-db', 'psql', '-X', '-qAt',
-        '-U', database_user, '-d', 'metering', '-v', 'ON_ERROR_STOP=1', '-c', SQL], True)
+    if external_database:
+        record['postgres'] = command(['python3', str(ROOT / 'scripts/pricetag/external-database'),
+                                      'query', SQL], True)
+    else:
+        database_user = 'postgres'
+        probe = prefix + ['podman', 'exec', 'pricetag-db', 'psql', '-X', '-qAt',
+            '-U', database_user, '-d', 'metering', '-c', 'SELECT 1']
+        if command(probe) != '1':
+            database_user = 'metering'
+        record['postgres'] = command(prefix + ['podman', 'exec', 'pricetag-db', 'psql', '-X', '-qAt',
+            '-U', database_user, '-d', 'metering', '-v', 'ON_ERROR_STOP=1', '-c', SQL], True)
     record['journal_usage'] = command(['journalctl', '--disk-usage'])
     record['container_storage'] = command(prefix + ['podman', 'system', 'df', '--format', 'json'], True)
     record['log_config'] = {name: command(prefix + ['podman', 'inspect', '--format',
-        '{{json .HostConfig.LogConfig}}', name], True) for name in SERVICES}
+        '{{json .HostConfig.LogConfig}}', name], True) for name in observed_services}
     return record
 
 

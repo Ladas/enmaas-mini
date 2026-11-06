@@ -33,8 +33,11 @@ def psql(environment_file, command='SELECT 1'):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('check', 'usage-count'))
+    parser.add_argument('action', choices=('check', 'usage-count', 'query'))
+    parser.add_argument('sql', nargs='?')
     args = parser.parse_args()
+    if args.action == 'query' and not args.sql:
+        parser.error('query requires SQL')
     if args.action == 'check':
         for name in ('metering', 'maas'):
             result = psql(DEPLOY / f'external-{name}-db.env',
@@ -42,8 +45,8 @@ def main():
             if result != f'{name}:{name}':
                 raise RuntimeError(f'external {name} database connection did not use the expected database and role')
     else:
-        result = psql(DEPLOY / 'external-metering-db.env',
-                      command='SELECT count(*) FROM usage_events')
+        sql = args.sql if args.action == 'query' else 'SELECT count(*) FROM usage_events'
+        result = psql(DEPLOY / 'external-metering-db.env', command=sql)
         print(result)
 
 
