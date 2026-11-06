@@ -122,12 +122,6 @@ It supplies settings for one launch; it is unnecessary after generating the
 unified native files above. Provider-specific `/vllm` and `/providers/NAME`
 routes are replaced when unified mode is enabled.
 
-## 4. Optional sandbox execution
-
-OpenShell requires separate authenticated management access. Ordinary-user
-enrollment is unfinished; see [OpenShell access status](../openshell-praxis/users.md).
-Continue using the direct clients above until that access is available.
-
 ## Continue after disconnecting
 
 Normal CLI processes may end when SSH disconnects; use the CLI's resume
@@ -144,6 +138,5 @@ Detach with Ctrl-b, then d. After reconnecting:
 tmux attach-session -t coding-task
 ```
 
-The administrator can install tmux if absent. OpenShell sandbox lifetime does
-not by itself guarantee that an interactive CLI session survives disconnects
-or that a deleted sandbox's workspace is retained.
+The administrator can install tmux if absent. Gateway lifetime does not by
+itself guarantee that an interactive CLI session survives disconnects.

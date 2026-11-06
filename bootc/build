@@ -3,36 +3,31 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/common/lib.sh
 source "${ROOT}/scripts/common/lib.sh"
-# shellcheck source=openshell/configs/images.env
-source "${ROOT}/openshell/configs/images.env"
-
 if [[ "${1:-}" == --help || "$#" -lt 1 || "$#" -gt 2 ]]; then
   cat <<'EOF'
-Usage: bootc/build base|praxis|vllm-cpu|vllm-gpu|codex|opencode|openclaw|all [IMAGE_PREFIX]
+Usage: bootc/build praxis|vllm-cpu|vllm-gpu [IMAGE_PREFIX]
 Run on an x86_64 Linux Podman builder, normally with sudo.
 RHEL_BOOTC_IMAGE must be a reviewed registry.redhat.io/rhel9/rhel-bootc@sha256:... reference.
-IMAGE_PREFIX defaults to localhost/secure-single-server.
+IMAGE_PREFIX defaults to localhost/enmaas-mini.
 On an AWS PAYG RHEL builder set AWS_RHUI_REGION (for example us-east-1).
 Set RHSM_ORG_ID and RHSM_ACTIVATION_KEY on a non-RHUI builder to register the
 ephemeral build with a Red Hat activation key. Secrets are mounted only for the
 RUN that installs packages and are never copied into an image layer.
-Praxis and the vLLM profiles build directly from RHEL bootc. Build base before
-a harness. The all target builds base, praxis, both vLLM profiles, and all
-three harnesses.
+Praxis and the vLLM profiles build directly from RHEL bootc.
 EOF
   [[ "${1:-}" == --help ]] && exit 0
   exit 2
 fi
 target="$1"
 case "${target}" in
-  base|praxis|vllm-cpu|vllm-gpu|codex|opencode|openclaw|all) ;;
+  praxis|vllm-cpu|vllm-gpu) ;;
   *) die "unknown target: ${target}" ;;
 esac
 direct_bootc=0
 case "${target}" in
-  base|praxis|vllm-cpu|vllm-gpu|all) direct_bootc=1 ;;
+  praxis|vllm-cpu|vllm-gpu) direct_bootc=1 ;;
 esac
-prefix="${2:-localhost/secure-single-server}"
+prefix="${2:-localhost/enmaas-mini}"
 [[ "${prefix}" =~ ^[a-z0-9][a-z0-9./:_-]*$ ]] || die 'invalid image prefix'
 [[ "$(podman info --format '{{.Host.OS}}/{{.Host.Arch}}')" == linux/amd64 ]] ||
   die 'an x86_64 Linux Podman builder is required'
@@ -45,13 +40,10 @@ if (( direct_bootc )); then
     rhsm=1
   fi
 fi
-
 work="$(mktemp -d)"
 secret_dir="${work}/secrets"
-base_context="${work}/base"
 praxis_context="${work}/praxis"
 vllm_context_root="${work}/vllm"
-harness_context_root="${work}/harnesses"
 rhui_repo=""
 cleanup() {
   rm -rf "${work}"
@@ -71,22 +63,6 @@ if (( direct_bootc )); then
     --secret "id=rhsm_activation_key,src=${secret_dir}/rhsm_activation_key"
   )
 fi
-
-make_base_context() {
-  install -d "${base_context}/bootc"
-  tar -C "${ROOT}" --exclude='*.secret' --exclude='*.local' --exclude='.env' \
-    --exclude='auth.json' --exclude='*.pem' --exclude='*.key' \
-    --exclude='__pycache__' --exclude='._*' \
-    -cf - scripts/common configs openshell/configs openshell/scripts \
-    bootc/Containerfile \
-    bootc/scripts/admin bootc/scripts/common bootc/scripts/inference-check \
-    bootc/scripts/reconcile bootc/scripts/vllm bootc/scripts/vllm-common \
-    bootc/scripts/vllm-lib \
-    bootc/systemd |
-    tar -C "${base_context}" -xf -
-  printf 'any\n' >"${base_context}/bootc/vllm-profile"
-  "${ROOT}/openshell/scripts/fetch-cli.sh" "${base_context}/bootc"
-}
 
 make_praxis_context() {
   install -d "${praxis_context}/bootc/scripts" "${praxis_context}/bootc/systemd" \
@@ -117,19 +93,6 @@ make_vllm_context() {
   printf '%s\n' "${profile}" >"${vllm_context}/bootc/vllm-profile"
 }
 
-make_harness_context() {
-  local harness="$1"
-  local context="${harness_context_root}/${harness}"
-  install -d "${context}/bootc/harnesses/${harness}" \
-    "${context}/openshell/harnesses/${harness}"
-  tar -C "${ROOT}" --exclude='*.secret' --exclude='*.local' --exclude='.env' \
-    --exclude='auth.json' --exclude='*.pem' --exclude='*.key' \
-    --exclude='__pycache__' --exclude='._*' \
-    -cf - bootc/Containerfile.harness \
-    "bootc/harnesses/${harness}" "openshell/harnesses/${harness}" "configs/templates/${harness}.json" |
-    tar -C "${context}" -xf -
-}
-
 repo_args=()
 if (( direct_bootc )) && [[ -n "${AWS_RHUI_REGION:-}" ]]; then
   [[ "${AWS_RHUI_REGION}" =~ ^[a-z]{2}-[a-z]+-[0-9]+$ ]] || die 'invalid AWS RHUI region'
@@ -146,19 +109,7 @@ if (( direct_bootc )) && [[ -n "${AWS_RHUI_REGION:-}" ]]; then
     --volume /etc/dnf/plugins/amazon-id.conf:/etc/dnf/plugins/amazon-id.conf:ro)
 fi
 
-if [[ "${target}" == base || "${target}" == all ]]; then
-  : "${RHEL_BOOTC_IMAGE:?set RHEL_BOOTC_IMAGE to the reviewed RHEL 9 bootc digest}"
-  validate_digest_image "${RHEL_BOOTC_IMAGE}"
-  [[ "${RHEL_BOOTC_IMAGE}" == registry.redhat.io/rhel9/rhel-bootc@sha256:* ]] ||
-    die 'expected the Red Hat RHEL 9 bootc repository'
-  make_base_context
-  podman build "${repo_args[@]}" "${secret_args[@]}" --arch amd64 \
-    --build-arg "RHEL_BOOTC_IMAGE=${RHEL_BOOTC_IMAGE}" \
-    --build-arg "RHSM=${rhsm}" \
-    -f "${base_context}/bootc/Containerfile" -t "${prefix}:base" "${base_context}"
-fi
-
-if [[ "${target}" == praxis || "${target}" == all ]]; then
+if [[ "${target}" == praxis ]]; then
   : "${RHEL_BOOTC_IMAGE:?set RHEL_BOOTC_IMAGE to the reviewed RHEL 9 bootc digest}"
   validate_digest_image "${RHEL_BOOTC_IMAGE}"
   [[ "${RHEL_BOOTC_IMAGE}" == registry.redhat.io/rhel9/rhel-bootc@sha256:* ]] ||
@@ -171,37 +122,17 @@ if [[ "${target}" == praxis || "${target}" == all ]]; then
     -t "${prefix}:praxis" "${praxis_context}"
 fi
 
-if [[ "${target}" == vllm-cpu || "${target}" == vllm-gpu || "${target}" == all ]]; then
+if [[ "${target}" == vllm-cpu || "${target}" == vllm-gpu ]]; then
   : "${RHEL_BOOTC_IMAGE:?set RHEL_BOOTC_IMAGE to the reviewed RHEL 9 bootc digest}"
   validate_digest_image "${RHEL_BOOTC_IMAGE}"
   [[ "${RHEL_BOOTC_IMAGE}" == registry.redhat.io/rhel9/rhel-bootc@sha256:* ]] ||
     die 'expected the Red Hat RHEL 9 bootc repository'
-  vllm_profiles=("${target#vllm-}")
-  [[ "${target}" != all ]] || vllm_profiles=(cpu gpu)
-  for profile in "${vllm_profiles[@]}"; do
-    make_vllm_context "${profile}"
-    vllm_context="${vllm_context_root}/${profile}"
-    podman build "${repo_args[@]}" "${secret_args[@]}" --arch amd64 \
-      --build-arg "RHEL_BOOTC_IMAGE=${RHEL_BOOTC_IMAGE}" \
-      --build-arg "RHSM=${rhsm}" \
-      -f "${vllm_context}/bootc/Containerfile.vllm.${profile}" \
-      -t "${prefix}:vllm-${profile}" "${vllm_context}"
-  done
-fi
-
-if [[ "${target}" != base && "${target}" != praxis && "${target}" != vllm-cpu && "${target}" != vllm-gpu ]]; then
-  # Resolve the actual parent ID so a moved local tag cannot change the parent.
-  parent="$(podman image inspect "${prefix}:base" --format '{{.Id}}')"
-  if [[ "${target}" == codex || "${target}" == opencode || "${target}" == openclaw || "${target}" == all ]]; then
-    harnesses=("${target}")
-    [[ "${target}" != all ]] || harnesses=(codex opencode openclaw)
-    for harness in "${harnesses[@]}"; do
-      make_harness_context "${harness}"
-      context="${harness_context_root}/${harness}"
-      podman build --pull=never --arch amd64 --build-arg "BASE_IMAGE=${parent}" \
-        --build-arg "HARNESS=${harness}" \
-        -f "${context}/bootc/Containerfile.harness" \
-        -t "${prefix}:${harness}" "${context}"
-    done
-  fi
+  profile="${target#vllm-}"
+  make_vllm_context "${profile}"
+  vllm_context="${vllm_context_root}/${profile}"
+  podman build "${repo_args[@]}" "${secret_args[@]}" --arch amd64 \
+    --build-arg "RHEL_BOOTC_IMAGE=${RHEL_BOOTC_IMAGE}" \
+    --build-arg "RHSM=${rhsm}" \
+    -f "${vllm_context}/bootc/Containerfile.vllm.${profile}" \
+    -t "${prefix}:vllm-${profile}" "${vllm_context}"
 fi

@@ -124,7 +124,6 @@ ruby -e '
 
 [[ -f docs/quickstarts/all-in-one/users.md ]] || die "user workflow is missing"
 [[ -f docs/testing/README.md ]] || die "testing index is missing"
-[[ -f docs/testing/harnesses.md ]] || die "harness acceptance guide is missing"
 for file in docs/quickstarts/all-in-one/in-memory.md docs/quickstarts/all-in-one/valkey.md docs/quickstarts/all-in-one/switchyard.md; do
   rg -q '^## 1\. Transfer the administrator deployment bundle$' "${file}"
   rg -q 'configs/all-in-one configs/common' "${file}"

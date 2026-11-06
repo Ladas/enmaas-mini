@@ -1,8 +1,7 @@
 # All-in-one RHEL AI gateway
 
 > **Where this fits:** An alternate route. Use this when users have separate
-> accounts on one trusted RHEL host and OpenShell containment is not the
-> primary boundary.
+> accounts on one trusted RHEL host.
 
 One administrator-managed Praxis gateway serves users who have separate
 accounts on the same private RHEL 9 server. Users can use the configured
@@ -147,7 +146,6 @@ Switchyard gaps to fill are:
    limits.
 6. Qwen installation is a separate [vLLM setup](../common/vllm.md).
    CPU tasks can take several minutes; prefer GPU for interactive work.
-   OpenShell integration has a separate [experimental add-on](../openshell-praxis/README.md).
 
 ## Additional details
 
@@ -163,10 +161,9 @@ The [local-model workflow](../common/vllm.md) pins separate upstream vLLM CPU/GP
 images and offers Qwen3-8B or quantized Qwen3.8-27B weights. Follow
 [user setup](users.md) for harness selection and context limits.
 
-For sandboxed harnesses, see the [OpenShell add-on](../openshell-praxis/README.md)
-or [bootc deployment](../../../bootc/README.md). Neither qualifies retained
-harness sessions. The direct-host workflows here use normal harness resume
-after reconnecting or `tmux`.
+For a repeatable OS image, see [bootc deployment](../../../bootc/README.md).
+The direct-host workflows here use normal client resume after reconnecting or
+`tmux`.
 
 ### Request-rate protection and token quotas
 

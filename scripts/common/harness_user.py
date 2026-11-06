@@ -35,7 +35,7 @@ def public_key(path):
 
 def create(user, key_file):
     if (not re.fullmatch(r"[a-z][a-z0-9_-]{0,30}", user) or
-            user in ("root", "praxis-svc", "openshell-svc", "praxis-smoke")):
+            user in ("root", "praxis-svc", "praxis-smoke")):
         raise ValueError("choose a new personal account name, separate from service/smoke accounts")
     try:
         pwd.getpwnam(user)
@@ -58,7 +58,7 @@ def create(user, key_file):
         raise ValueError("new account has unexpected UID or groups; inspect it before enabling login")
     home.chmod(0o700)
     # Only public client tooling is shared; never copy the deployment bundle,
-    # its material directory, provider secrets or the OpenShell owner's state.
+    # its material directory, or provider secrets.
     for directory, name, content, mode in (
             (BIN_DIR, "praxis-harness", launcher, 0o755),
             (BIN_DIR, 'praxis-harness-config', configure, 0o755),

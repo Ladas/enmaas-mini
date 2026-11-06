@@ -168,6 +168,6 @@ Restore a clean VM snapshot before separately testing the Valkey and
 Switchyard profiles. Local VM success is the pre-AWS gate; it does not replace
 final acceptance on the target AWS RHEL instance.
 
-Next, run [in-memory and Valkey harness acceptance](harnesses.md) with real
+Next, run in-memory and Valkey gateway tests with real
 provider keys stored by the administrator. Switchyard provider testing is a
 later phase. Do not capture snapshots containing real keys for distribution.

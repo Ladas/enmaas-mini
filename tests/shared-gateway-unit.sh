@@ -29,7 +29,7 @@ expect_failure() {
 [[ "$(oci_architecture aarch64)" == arm64 ]] || die "aarch64 mapping failed"
 [[ "$(oci_architecture arm64)" == arm64 ]] || die "arm64 mapping failed"
 [[ "$(gateway_lock_path praxis-svc)" == /run/lock/praxis-gateway.lock ]] || die 'Praxis lock changed'
-[[ "$(gateway_lock_path openshell-svc)" != "$(gateway_lock_path praxis-svc)" ]] || die 'independent owners share a lock'
+[[ "$(gateway_lock_path maas-svc)" != "$(gateway_lock_path praxis-svc)" ]] || die 'independent owners share a lock'
 expect_failure gateway_lock_path '../invalid'
 expect_failure oci_architecture ppc64le
 expect_failure oci_architecture ''
@@ -101,7 +101,7 @@ expect_missing_value() {  # <flag> [args...]
   [[ "${output}" == *"missing value for ${flag}"* ]] ||
     die "installer did not report a missing value for ${flag}"
 }
-expect_missing_value --owner --owner
+expect_missing_value --jwt-public-key --jwt-public-key
 expect_missing_value --tls-cert --tls-cert
 expect_missing_value --openai-secret --openai-secret --replace
 bash "${REPO_DIR}/scripts/common/install" --help >/dev/null 2>&1 ||

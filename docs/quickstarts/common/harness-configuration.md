@@ -242,4 +242,4 @@ not a complete runnable configuration export.
 steps and tool permissions, and Claude uses
 streamed JSON print mode with a turn limit and restricted tools. These smoke
 settings are distinct from normal interactive approvals. See
-[manual acceptance](../../testing/harnesses.md).
+[mock-provider testing](../../testing/mocked-provider.md).

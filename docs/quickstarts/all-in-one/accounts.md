@@ -51,5 +51,5 @@ Continue with [user setup and usage](users.md) to install the pinned CLIs and
 choose Qwen, OpenAI or Anthropic. Remote-gateway users instead follow
 [client setup](../remote-gateway/users.md) on their own machines.
 
-For optional sandbox execution, the administrator [installs OpenShell](../openshell-praxis/install.md);
-individual sandbox access awaits [OpenShell user enrollment](../openshell-praxis/users.md).
+Users run client tools in their own accounts. The gateway deployment does not
+grant administrative access.

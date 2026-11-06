@@ -42,8 +42,7 @@ class VllmTests(unittest.TestCase):
                 self.assertNotIn('PublishPort=0.0.0.0:8000:8000', unit)
                 arguments = shlex.split(next(line[5:] for line in unit.splitlines()
                                              if line.startswith('Exec=')))
-                provider = json.loads((ROOT / 'configs/vllm/harness/harness-provider.json.in').read_text())
-                context = provider['provider']['praxis']['models']['@@MODEL_ID@@']['limit']['context']
+                context = 16384
                 self.assertEqual(int(arguments[arguments.index('--max-model-len') + 1]), context)
                 self.assertEqual(json.loads(arguments[arguments.index('--default-chat-template-kwargs') + 1]),
                                  {'enable_thinking': False})

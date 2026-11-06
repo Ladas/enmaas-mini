@@ -1,10 +1,9 @@
-site_name: Secure single-server AI harness
+site_name: enMAAS Mini
 site_description: >-
-  Run OpenCode and OpenClaw on one dedicated RHEL 9.8+ host with OpenShell,
-  Praxis, and bootc.
-site_url: https://redhat-et.github.io/secure-single-server/
-repo_url: https://github.com/redhat-et/secure-single-server
-repo_name: redhat-et/secure-single-server
+  Experimental Praxis and PriceTag model-gateway deployment guides.
+site_url: https://redhat-et.github.io/enmaas-mini/
+repo_url: https://github.com/redhat-et/enmaas-mini
+repo_name: redhat-et/enmaas-mini
 edit_uri: edit/main/
 copyright: Experimental demonstration, not a production-ready platform.
 
@@ -50,23 +49,8 @@ nav:
   - Start here:
       - Introduction: docs/README.md
       - Architecture overview: docs/quickstarts/architecture-walkthrough/README.md
-      - OpenShell Overview: openshell/docs/README.md
-      - Streamlit before and after OpenShell: docs/examples/streamlit-security/README.md
   - Deployment:
       - Deployment methods: docs/deployment-methods.md
-      - OpenShell single server:
-          - Overview: docs/quickstarts/openshell-single-server/README.md
-          - Manual container deployment: docs/quickstarts/openshell-single-server/manual.md
-          - Bootc deployment: docs/quickstarts/openshell-single-server/bootc.md
-          - Model endpoint configuration: docs/quickstarts/openshell-single-server/model-access.md
-          - Verification: docs/quickstarts/openshell-single-server/verification.md
-          - Qualification and policy reference: docs/quickstarts/openshell-single-server/reference.md
-      - OpenShell + Praxis:
-          - Overview: docs/quickstarts/openshell-praxis/README.md
-          - Install: docs/quickstarts/openshell-praxis/install.md
-          - OpenClaw bounded tasks: docs/quickstarts/openshell-praxis/openclaw.md
-          - Integration matrix: docs/quickstarts/openshell-praxis/users.md
-      - Experimental llm-d-sc semantic routing: docs/quickstarts/llm-d-sc/README.md
       - Common gateway configuration:
           - Overview: docs/quickstarts/common/README.md
           - Harness configuration: docs/quickstarts/common/harness-configuration.md
@@ -100,40 +84,24 @@ nav:
           - Pilot limits and qualification: docs/testing/pricetag.md
           - AWS deployment runbook: docs/testing/aws-pricetag.md
           - Performance procedure: docs/testing/pricetag-perf.md
-  - Scenarios:
+  - Examples:
       - Overview: docs/examples/README.md
-      - OpenCode PR-candidate queue: docs/examples/opencode-pr-queue/README.md
-      - Review as a service: docs/examples/review-service/README.md
       - Praxis token quotas: docs/examples/praxis-quotas/README.md
-      - API key theft: docs/examples/api-key-theft/README.md
-      - Document exfiltration: docs/examples/document-exfiltration/README.md
-      - Model escalation: docs/examples/model-escalation/README.md
   - Development:
+      - Documentation site: docs/development/documentation-site.md
       - MaaS and PriceTag image publication: docs/development/pricetag-images.md
       - PriceTag gateway routing: docs/development/pricetag-routing.md
   - Testing:
       - Testing guide: docs/testing/README.md
-      - Compatibility matrix: docs/testing/compatibility.md
-      - Validation records: bootc/VALIDATION.md
-      - vLLM validation: bootc/VLLM-VALIDATION.md
+      - Mock provider tests: docs/testing/mocked-provider.md
+      - AWS VM runbook: docs/testing/aws.md
+      - AWS operations: docs/testing/aws-operations.md
 
 extra_css:
   - assets/stylesheets/redhat.css
 
 not_in_nav: |
   bootc/README.md
-  docs/quickstarts/bootc/README.md
-  docs/quickstarts/podman/README.md
-  docs/roadmap.md
-  docs/development/documentation-site.md
-  docs/development/openshell-upstream.md
-  openshell/docs/policy-walkthrough.md
-  openshell/docs/threat-model.md
-  openshell/harnesses/openclaw/README.md
-  openshell/harnesses/opencode/README.md
-  openshell/harnesses/opencode/review-agents.md
-  openshell/harnesses/opencode/pr-queue/instructions.md
-  openshell/demos/streamlit-security/README.md
 
 markdown_extensions:
   - admonition
@@ -170,5 +138,5 @@ extra:
   generator: false
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/redhat-et/secure-single-server
-      name: Secure single-server AI harness on GitHub
+      link: https://github.com/redhat-et/enmaas-mini
+      name: enMAAS Mini on GitHub

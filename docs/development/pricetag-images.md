@@ -5,8 +5,8 @@ The [image workflow](../../.github/workflows/pricetag-images.yml) builds two
 
 | Image repository | Source |
 | --- | --- |
-| `quay.io/redhat-et/secure-single-server-maas-standalone` | [MaaS standalone revision](https://github.com/Ladas/models-as-a-service/commit/6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d) |
-| `quay.io/redhat-et/secure-single-server-pricetag-metering` | [PriceTag management demo revision](https://github.com/Ladas/pricetag-metering/commit/666770c4e31e035c1de236490bbff9dfffe7e047) |
+| `quay.io/redhat-et/enmaas-mini-maas-standalone` | [MaaS standalone revision](https://github.com/Ladas/models-as-a-service/commit/6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d) |
+| `quay.io/redhat-et/enmaas-mini-pricetag-metering` | [PriceTag management demo revision](https://github.com/Ladas/pricetag-metering/commit/666770c4e31e035c1de236490bbff9dfffe7e047) |
 
 PriceTag includes the management demo, scoped dashboards and the reviewed key, budget and pricing fixes.
 The optional provider/model adapter follow-up is excluded. These changes are
@@ -34,12 +34,12 @@ unauthenticated metering events. Tests use ephemeral containers and synthetic
 credentials, with ports bound only to loopback. This is a component smoke test;
 full gateway authentication, quotas and performance require deployment tests.
 
-Only runs on `redhat-et/secure-single-server` `main` publish, after both images
+Only runs on `redhat-et/enmaas-mini` `main` publish, after both images
 pass. Manual dispatch on `main` can publish the initial images:
 
 ```console
-gh workflow run pricetag-images.yml --repo redhat-et/secure-single-server --ref main
-gh run list --repo redhat-et/secure-single-server --workflow pricetag-images.yml --limit 5
+gh workflow run pricetag-images.yml --repo redhat-et/enmaas-mini --ref main
+gh run list --repo redhat-et/enmaas-mini --workflow pricetag-images.yml --limit 5
 ```
 
 Each image gets `sha-<full single-server commit>` as its tag. The run summary
