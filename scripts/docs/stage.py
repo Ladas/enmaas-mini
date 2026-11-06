@@ -26,30 +26,20 @@ SOURCES = (
     "README.md",
     "docs",
     "bootc",
-    "openshell/docs",
-    "openshell/harnesses",
-    "openshell/demos",
 )
 PUBLISHED_TESTING_DOCS = frozenset(
     ROOT / path
     for path in (
         "docs/testing/README.md",
-        "docs/testing/compatibility.md",
+        "docs/testing/aws.md",
+        "docs/testing/aws-operations.md",
+        "docs/testing/mocked-provider.md",
         "docs/testing/pricetag.md",
         "docs/testing/aws-pricetag.md",
         "docs/testing/pricetag-perf.md",
     )
 )
-EXCLUDED_SOURCES = (
-    ROOT / "docs/roadmap.md",
-    ROOT / "openshell/docs/upgrade.md",
-    ROOT / "docs/development/workload-templates.md",
-    ROOT / "docs/development/sandbox-use-case-analysis.md",
-    ROOT / "docs/development/review-turn-stdin-hang.md",
-    ROOT / "docs/development/documentation-site.md",
-    ROOT / "docs/slides/secure-single-server-overview.md",
-    ROOT / "docs/examples/opencode-pr-queue/demo-task.md",
-)
+EXCLUDED_SOURCES: tuple[Path, ...] = ()
 
 
 def markdown_files(source: Path) -> list[Path]:
@@ -59,18 +49,8 @@ def markdown_files(source: Path) -> list[Path]:
 
 
 def static_pages() -> list[Path]:
-    """Return the self-contained HTML pages published with the docs.
-
-    These are each scenario's rendered visual demo and the slide decks. Staging
-    them keeps them in the MkDocs file set, so links to them stay relative. The
-    ``visual-demo.src.html`` sources are not published.
-    """
-    return sorted(
-        [
-            *(ROOT / "docs/examples").glob("*/visual-demo.html"),
-            *(ROOT / "docs/slides").glob("*.html"),
-        ]
-    )
+    """Return self-contained HTML pages published with the docs."""
+    return sorted((ROOT / "docs").rglob("*.html"))
 
 
 def navigation_paths() -> set[str]:

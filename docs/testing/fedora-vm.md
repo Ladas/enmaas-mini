@@ -60,7 +60,7 @@ required. Do not clone `main` and assume it contains an unmerged change.
    access to service files/control. Remote: use two distinct caller JWTs from
    the Mac; confirm private ports and TLS/JWT denials.
 3. Add real test provider keys using hidden prompts in the quickstart, then
-   run [harness acceptance](harnesses.md) for memory and Valkey.
+   run the [gateway test suites](README.md) for memory and Valkey.
 4. Repeat on [RHEL 9](rhel-vm.md), then [AWS RHEL](aws.md). Record Fedora and
    RHEL results separately; do not label Fedora results as RHEL acceptance.
 

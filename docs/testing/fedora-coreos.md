@@ -41,5 +41,5 @@ test](podman.md).
 Do not run the persistent installer in the Podman machine. Fedora CoreOS does
 not qualify the RHEL package, SELinux, systemd user-service, logout, or reboot
 path. Run those checks in a [local RHEL VM](rhel-vm.md).
-Then follow [harness acceptance](harnesses.md) to test protected real provider
+Then follow the [testing guide](README.md) to test protected real provider
 keys with the in-memory and Valkey service profiles.

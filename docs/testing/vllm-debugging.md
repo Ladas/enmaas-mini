@@ -3,7 +3,7 @@
 This page tracks bugs with **vLLM 0.30.0**, Qwen3-8B / Qwen3.8-27B thinking enabled and the
 published **Praxis PR #40 image**. It does not qualify API translation.
 Results, exact pins and performance belong in the
-[compatibility matrix](compatibility.md).
+the [testing guide](README.md).
 
 [vLLM 0.30.0](https://github.com/vllm-project/vllm/releases/tag/v0.30.0) is an
 official release with separate CPU/GPU images. Praxis uses
@@ -54,6 +54,6 @@ assistant message shape. Unified mode can hide Qwen's returned reasoning
 without disabling thinking. A temporary loopback adapter addresses the two
 return-path failures. It is not installed in normal Praxis routing.
 
-See [feature testing](gateway-features.md#model-switching-and-reasoning) for
+See the [testing guide](README.md) for
 current results, numbered fix descriptions and copyable experiment commands.
 Opaque compaction remains blocked; long-history downshifts are unqualified.

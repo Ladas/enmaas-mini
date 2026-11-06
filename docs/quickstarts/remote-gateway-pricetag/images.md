@@ -28,8 +28,8 @@ Run examples below in **this SSH session**. New shell? Restore
 Publication repositories:
 
 ```text
-quay.io/redhat-et/secure-single-server-maas-standalone
-quay.io/redhat-et/secure-single-server-pricetag-metering
+quay.io/redhat-et/enmaas-mini-maas-standalone
+quay.io/redhat-et/enmaas-mini-pricetag-metering
 ```
 
 The published images target `linux/amd64`. They are pinned in

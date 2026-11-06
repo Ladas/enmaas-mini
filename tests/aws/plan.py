@@ -65,7 +65,7 @@ class PlanTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             key = Path(directory) / "test.pub"
             key.write_text("ssh-ed25519 synthetic-test-key\n")
-            for scenario in ["all-in-one", "remote-gateway", "openshell-praxis"]:
+            for scenario in ["all-in-one", "remote-gateway"]:
                 for arch, native, inference, instance, disk in [
                         ("amd64", "x86_64", "none", "m7i.2xlarge", 50),
                         ("arm64", "arm64", "none", "m7g.2xlarge", 50),
@@ -425,7 +425,6 @@ class PlanTest(unittest.TestCase):
     def test_ingress_is_explicit_and_scenario_specific(self):
         self.assertEqual([rule["FromPort"] for rule in vm.ingress("all-in-one", "192.0.2.1/32")], [22])
         self.assertEqual([rule["FromPort"] for rule in vm.ingress("remote-gateway", "192.0.2.1/32")], [22, 8443])
-        self.assertEqual([rule["FromPort"] for rule in vm.ingress("openshell-praxis", "192.0.2.1/32")], [22])
         self.assertEqual([rule["FromPort"] for rule in vm.ingress("vllm-server", "192.0.2.1/32")], [22])
         with self.assertRaises(ValueError):
             vm.ingress("typo", "192.0.2.1/32")

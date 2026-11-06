@@ -316,35 +316,11 @@ def return_to_mocks(args):
     (STATE / "state.json").rename(STATE / f"state-real-{time.time_ns()}.json")
 
 
-def openshell_inference(state):
-    if state.get("mock", True):
-        return ["OPENSHELL_MODEL_ID=fixture"]
-    if not state.get("ready"):
-        raise ValueError("complete real-setup before OpenShell inference")
-    return ["OPENSHELL_MODEL_ID=" + state.get("model", "qwen3-8b"), "PRAXIS_API_PREFIX=/vllm"]
-
-
-def openshell_names(owner_command):
-    result = run(*owner_command, "openshell", "sandbox", "list", "--output", "json",
-                 cwd="/", capture_output=True, text=True)
-    return {item["name"] for item in json.loads(result.stdout)["sandboxes"]}
-
-
-def openshell_leftovers(owner_command, existing, attempts=15):
-    # Delete accepts the request before the gateway finishes removing containers.
-    for attempt in range(attempts):
-        leftovers = sorted(name for name in openshell_names(owner_command) - existing
-                           if name.startswith(("ospx-smoke-", "policy-deny-", "policy-allow-")))
-        if not leftovers or attempt + 1 == attempts:
-            return leftovers
-        time.sleep(2)
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scenario", required=True, choices=("all-in-one", "remote-gateway"))
     parser.add_argument("--profile", required=True, choices=("memory", "valkey"))
-    parser.add_argument("--phase", required=True, choices=("install", "mock", "test", "check", "openshell", "switch-profile", "providers", "gpu-drivers", "real-setup", "real-test", "mock-again", "features", "features-restore", "all"))
+    parser.add_argument("--phase", required=True, choices=("install", "mock", "test", "check", "switch-profile", "providers", "gpu-drivers", "real-setup", "real-test", "mock-again", "features", "features-restore", "all"))
     parser.add_argument("--feature-provider", choices=("vllm", "cloud"), default="vllm")
     parser.add_argument("--inference", choices=("cpu", "gpu"))
     parser.add_argument("--vllm-image")
@@ -425,87 +401,6 @@ def main():
     if args.phase == "check":
         run("scripts/common/status")
         run("scripts/common/verify", "--host")
-    if args.phase == "openshell":
-        if args.scenario != "all-in-one" or not (STATE / f"baseline-{args.profile}.json").is_file():
-            raise ValueError("OpenShell requires a passing all-in-one baseline on this VM first")
-        installed(args)
-        protected = {p: p.read_bytes() for p in Path("/etc/praxis").iterdir() if p.is_file()}
-        run("scripts/openshell-praxis/install", "--owner", "openshell-svc")
-        if any(p.read_bytes() != data for p, data in protected.items()):
-            raise ValueError("OpenShell changed the Praxis baseline")
-        print("PASS: OpenShell addon preserves installed all-in-one Praxis files", flush=True)
-        owner = pwd.getpwnam("openshell-svc")
-        # Registration belongs to the locked owner, as in openshell/tests/runtime.sh.
-        # Copy public source only; never expose the private administrator bundle.
-        with tempfile.TemporaryDirectory(prefix="praxis-openshell-smoke-", dir="/var/tmp") as directory:
-            for name in ("configs", "scripts", "tests", "openshell"):
-                shutil.copytree(ROOT / name, Path(directory) / name)
-            run("chown", "-R", f"root:{owner.pw_gid}", directory)
-            run("chmod", "-R", "u=rwX,g=rX,o=", directory)
-            owner_command = ["runuser", "-u", "openshell-svc", "--", "env", "-i",
-                f"HOME={owner.pw_dir}", "PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin", "LANG=C.UTF-8",
-                f"XDG_RUNTIME_DIR=/run/user/{owner.pw_uid}",
-                f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{owner.pw_uid}/bus",
-                "OPENSHELL_TELEMETRY_ENABLED=false",
-                *openshell_inference(json.loads((STATE / "state.json").read_text()))]
-            state_directory = Path(owner.pw_dir) / "opencode-pr-queue"
-            run("install", "-d", "-o", owner.pw_name,
-                "-g", pwd.getpwgid(owner.pw_gid).pw_name, "-m", "0700",
-                state_directory)
-            fake_bin = Path(directory) / "fake-bin"
-            fake_bin.mkdir()
-            fake_curl = fake_bin / "curl"
-            fake_curl.write_text(
-                "#!/bin/sh\n"
-                "output=\n"
-                "while [ \"$#\" -gt 0 ]; do\n"
-                "  case \"$1\" in\n"
-                "    --output) output=\"$2\"; shift 2 ;;\n"
-                "    *) shift ;;\n"
-                "  esac\n"
-                "done\n"
-                "printf '[]\\n' >\"$output\"\n"
-                "printf 'HTTP_STATUS=200\\nCONTENT_TYPE=application/json\\n'\n")
-            fake_curl.chmod(0o755)
-            state_file = state_directory / "runbook-smoke-state.json"
-            lock_file = Path(f"{state_file}.lock")
-            watch_command = ["runuser", "-u", "openshell-svc", "--", "env", "-i",
-                f"HOME={owner.pw_dir}",
-                f"PATH={fake_bin}:/usr/local/bin:/usr/bin:/usr/sbin:/bin",
-                "LANG=C.UTF-8", f"XDG_RUNTIME_DIR=/run/user/{owner.pw_uid}",
-                f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{owner.pw_uid}/bus",
-                "bash", str(Path(directory) / "openshell/harnesses/opencode/pr-queue/watch.sh"),
-                "--name", "opencode-pr-queue", "--repo", "owner/repo",
-                "--label", "bot", "--state", str(state_file),
-                "--once", "--dry-run"]
-            try:
-                watch = subprocess.run(watch_command, cwd="/", text=True,
-                                       capture_output=True, timeout=30)
-                if watch.returncode:
-                    raise ValueError(
-                        "OpenCode watcher runbook failed under openshell-svc: "
-                        + watch.stderr.strip())
-                state_status = state_file.stat()
-                if (state_status.st_uid != owner.pw_uid or
-                        state_status.st_mode & 0o777 != 0o600):
-                    raise ValueError("OpenCode watcher state is not service-owned and private")
-                print("PASS: OpenCode watcher runbook state under openshell-svc", flush=True)
-            finally:
-                state_file.unlink(missing_ok=True)
-                lock_file.unlink(missing_ok=True)
-            existing = openshell_names(owner_command)
-            result = subprocess.run([*owner_command, "bash", str(Path(directory) / "tests/openshell-praxis/smoke.sh")], cwd="/")
-            advisor = subprocess.run([*owner_command, "bash", str(Path(directory) / "openshell/tests/policy-advisor.sh")], cwd="/")
-            if result.returncode:
-                print("Integrated inference failed; checking independent policy positive control separately", flush=True)
-                policy = subprocess.run([*owner_command, "bash", str(Path(directory) / "openshell/tests/openshell-policy.sh")], cwd="/")
-                print(f"Independent policy suite exit code: {policy.returncode}", flush=True)
-            leftovers = openshell_leftovers(owner_command, existing)
-            print("OpenShell test sandbox leftovers: " + json.dumps(leftovers), flush=True)
-            if result.returncode or advisor.returncode or leftovers:
-                raise ValueError("OpenShell qualification failed; keep experimental support and retain the evidence")
-
-
 if __name__ == "__main__":
     try:
         main()

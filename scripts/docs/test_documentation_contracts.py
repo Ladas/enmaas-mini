@@ -66,7 +66,7 @@ class DocumentationContractsTests(unittest.TestCase):
             Loader=MkDocsTestLoader,
         )
         scenario_nav = next(
-            section["Scenarios"] for section in config["nav"] if "Scenarios" in section
+            section["Examples"] for section in config["nav"] if "Examples" in section
         )
         index = (ROOT / "docs/examples/README.md").read_text(encoding="utf-8")
         for title, target in scenario_pages(scenario_nav):

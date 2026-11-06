@@ -41,7 +41,7 @@ planning cannot prove mutation permissions or reserve capacity. No
 
 ## Direct CLI and custom VM configurations
 
-The [session helper](https://github.com/redhat-et/secure-single-server/blob/main/scripts/aws/session.sh) manages hidden credential
+The [session helper](https://github.com/redhat-et/enmaas-mini/blob/main/scripts/aws/session.sh) manages hidden credential
 entry and common workstation settings. The [VM helper](../../scripts/aws/rhel-vm)
 plans/applies/verifies exactly one VM. It also works directly with your normal
 AWS CLI credential chain; do not mix exported keys and an AWS profile.
@@ -60,8 +60,7 @@ inputs. A recorded failed instance launch is reconciled and retried using its ex
 security group/key pair. Completed VMs and unrelated name collisions are refused.
 
 Plan/apply require `--config`. The hardware presets omit `scenario`; pass it with
-`--scenario all-in-one`, `--scenario remote-gateway`, `--scenario openshell-praxis`
-or `--scenario vllm-server`. The session helper
+`--scenario all-in-one`, `--scenario remote-gateway` or `--scenario vllm-server`. The session helper
 requires that flag, including for a custom file. JSON accepts `scenario`,
 `inference`, `arch`, `instance_type`, `volume_gib`, optional `ami_id` and
 `ssh_access` / `https_access` (`restricted` or `public`, both default to
@@ -73,10 +72,8 @@ Omitted type/disk defaults depend on inference: `none` uses `m7i.2xlarge`
 retains its explicit type/disk, so edit all three or choose the matching preset.
 Unknown keys, wrong types, small disks and incompatible architectures fail.
 
-For OpenShell deployment or runtime qualification, use an official RHEL 9.8+
-AMI. Pass its ID with `--ami-id`: automatic AMI selection has chosen an older
-RHEL 9 minor version in this region. See the
-[v0.1.5 validation record](upgrade-0.1.5.md) for the tested image and Podman
+For deployment qualification, use an official RHEL 9.8+ AMI. Pass its ID with
+`--ami-id` when automatic selection does not provide the required minor
 version.
 
 To edit reusable settings without changing a tracked preset, copy a file to

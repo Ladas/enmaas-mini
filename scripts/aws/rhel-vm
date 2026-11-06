@@ -20,7 +20,7 @@ import uuid
 
 OWNER = "309956199498"
 MANAGED = "secure-single-server-test"
-SCENARIOS = ("all-in-one", "remote-gateway", "openshell-praxis", "vllm-server")
+SCENARIOS = ("all-in-one", "remote-gateway", "vllm-server")
 VLLM_PORT = 8000
 CONFIG_KEYS = {"scenario", "inference", "arch", "instance_type", "volume_gib", "ami_id", "ssh_access", "https_access"}
 READS = {"get-caller-identity", "describe-instance-types", "describe-images", "describe-subnets",
@@ -398,7 +398,7 @@ def configure(args):
     if inference not in ("none", "cpu", "gpu") or arch not in ("amd64", "arm64"):
         raise ValueError("inference must be none/cpu/gpu and arch must be amd64/arm64")
     if settings.get("scenario") not in SCENARIOS:
-        raise ValueError("set scenario to all-in-one, remote-gateway, openshell-praxis or vllm-server")
+        raise ValueError("set scenario to all-in-one, remote-gateway or vllm-server")
     if settings.get("scenario") == "vllm-server" and inference == "none":
         raise ValueError("vllm-server requires the cpu or gpu inference hardware profile")
     if inference != "none" and arch != "amd64":

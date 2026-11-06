@@ -19,7 +19,7 @@ profile=$2
 case "$scenario" in
   all-in-one) [[ "$#" -eq 2 ]] || die 'all-in-one takes no TLS material directory' ;;
   remote-gateway) [[ "$#" -eq 3 ]] || die 'remote-gateway requires its TLS/public JWT material directory' ;;
-  *) die 'scenario must be all-in-one or remote-gateway; OpenShell is a later test stage' ;;
+  *) die 'scenario must be all-in-one or remote-gateway' ;;
 esac
 case "$profile" in
   memory|valkey) ;;

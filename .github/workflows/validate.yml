@@ -36,7 +36,6 @@ jobs:
           sudo apt-get install -y curl jq ripgrep ruby zsh python3-yaml python3-jinja2
       - name: Install pinned ShellCheck
         env:
-          # Update both matrix checksums when changing this version.
           SHELLCHECK_VERSION: 0.11.0
           SHELLCHECK_ARCH: ${{ matrix.shellcheck_arch }}
           SHELLCHECK_SHA256: ${{ matrix.shellcheck_sha256 }}
@@ -54,7 +53,7 @@ jobs:
           bin_dir="${install_dir}/shellcheck-v${SHELLCHECK_VERSION}"
           "${bin_dir}/shellcheck" --version
           "${bin_dir}/shellcheck" --version | grep -Fx "version: ${SHELLCHECK_VERSION}"
-          printf '%s\n' "${bin_dir}" >> "${GITHUB_PATH}"
+          printf '%s\n' "${bin_dir}" >>"${GITHUB_PATH}"
       - name: Check scripts, templates, documentation, and regressions
         run: python3 tests/mocked-provider.py --suite offline --engine docker
       - name: Check external-client TLS, caller fixtures, isolation and cancellation
@@ -66,8 +65,7 @@ jobs:
           python3 bootc/tests/praxis.py
           python3 bootc/tests/vllm.py
           python3 bootc/tests/vllm-lock.py
-          python3 bootc/tests/inference.py
-          shellcheck -x bootc/build bootc/install-nvidia bootc/test-images bootc/test-host bootc/test-inference bootc/scripts/*
+          shellcheck -x bootc/build bootc/install-nvidia bootc/test-images bootc/scripts/*
       - name: Check native runner architecture
         env:
           EXPECTED_ARCH: ${{ matrix.arch }}
@@ -79,10 +77,6 @@ jobs:
         env:
           CONTAINER_ENGINE: docker
         run: tests/shared-gateway-image.sh
-      - name: Verify local inference routing with a synthetic vLLM server
-        env:
-          CONTAINER_ENGINE: docker
-        run: python3 bootc/tests/inference-image.py
       - name: Verify Valkey ACL and persistence without provider keys
         env:
           CONTAINER_ENGINE: docker
@@ -102,68 +96,4 @@ jobs:
           name: mocked-provider-${{ matrix.arch }}
           path: evidence/mocked-provider/*.json
           if-no-files-found: warn
-          retention-days: 7
-
-  llm-d-sc-routing:
-    name: llm-d-sc semantic routing
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - name: Check offline llm-d-sc contracts
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-yaml
-          python3 -B tests/llm-d-sc/unit.py
-      - name: Exercise semantic routing without OpenShift or Compose
-        env:
-          CONTAINER_ENGINE: docker
-          TEST_EVIDENCE_DIR: evidence/llm-d-sc
-        run: python3 tests/llm-d-sc/integration.py
-      - name: Upload redacted routing evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: llm-d-sc-routing
-          path: evidence/llm-d-sc/*.json
-          if-no-files-found: warn
-          retention-days: 7
-
-  # Executable/configuration contracts run without a sandbox gateway.
-  # The manual disposable-RHEL runtime lane remains separate.
-  openshell-regressions:
-    name: OpenShell harness contracts and pinned schemas
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Install policy parser
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-yaml ripgrep
-          # Hosted runners already provide Node. Avoid downloading a second
-          # distribution copy before the actual regression checks can run.
-          if ! command -v node >/dev/null; then
-            sudo apt-get install -y --no-install-recommends nodejs
-          fi
-          node --version
-      - name: Exercise harness entry points and denial regressions
-        run: python3 tests/mocked-provider.py --suite openshell --engine docker
-      - name: Report runtime coverage separately
-        if: always()
-        run: |
-          echo 'OpenShell runtime: NOT RUN. Use the separate manual disposable-RHEL qualification lane.' >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload regression status
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: openshell-regressions
-          path: |
-            evidence/mocked-provider/suite-openshell-*.json
-            evidence/mocked-provider/openshell-schema.json
           retention-days: 7

@@ -1,6 +1,6 @@
 # Separate-host Qwen3-8B through vLLM with in-memory shared limits.
 # Bootc profile. The administrator supplies a private host:port endpoint;
-# Praxis remains the only loopback service exposed to OpenShell harnesses.
+# Praxis remains the only loopback service exposed to gateway clients.
 
 insecure_options:
   allow_private_endpoints: true
