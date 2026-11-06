@@ -3,15 +3,19 @@
 import os
 from pathlib import Path
 import secrets
+import shlex
 import subprocess
 import sys
 import tempfile
 import time
 import uuid
+from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts/pricetag'))
-from prepare import POSTGRES, external_client_environment
+from prepare import POSTGRES, external_client_environment, external_password_file
+
+PODMAN = os.environ.get('PODMAN', 'podman').split()
 
 
 def run(command, capture=False):
@@ -22,12 +26,12 @@ def run(command, capture=False):
 
 def wait_for_postgres(container):
     for _ in range(60):
-        result = subprocess.run(['podman', 'exec', container, 'pg_isready', '-U', 'postgres'],
+        result = subprocess.run(PODMAN + ['exec', container, 'pg_isready', '-U', 'postgres'],
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if result.returncode == 0:
             return
         time.sleep(1)
-    logs = subprocess.run(['podman', 'logs', container], text=True,
+    logs = subprocess.run(PODMAN + ['logs', container], text=True,
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout
     raise RuntimeError('disposable PostgreSQL did not become ready:\n' + logs[-4000:])
 
@@ -45,50 +49,56 @@ def main():
              '-subj', '/CN=external-db.test', '-addext', 'subjectAltName=DNS:external-db.test',
              '-keyout', key, '-out', certificate])
         try:
-            run(['podman', 'network', 'create', network])
-            run(['podman', 'run', '-d', '--name', container, '--network', network,
+            run(PODMAN + ['network', 'create', network])
+            run(PODMAN + ['run', '-d', '--name', container, '--network', network,
                  '--network-alias', 'external-db.test', '--env', 'POSTGRES_PASSWORD=' + password,
                  POSTGRES])
             wait_for_postgres(container)
             for source, target in ((certificate, '/tmp/server.crt'), (key, '/tmp/server.key')):
                 with source.open('rb') as stream:
-                    subprocess.run(['podman', 'exec', '--user', '999', '-i', container,
+                    subprocess.run(PODMAN + ['exec', '--user', '999', '-i', container,
                                    'sh', '-c', f'cat > {target}'],
                                    stdin=stream, check=True)
-            run(['podman', 'exec', '--user', '999', container, 'chmod', '0600', '/tmp/server.key'])
-            run(['podman', 'exec', container, 'psql', '-U', 'postgres', '-d', 'postgres',
+            run(PODMAN + ['exec', '--user', '999', container, 'chmod', '0600', '/tmp/server.key'])
+            run(PODMAN + ['exec', container, 'psql', '-U', 'postgres', '-d', 'postgres',
                  '-c', "ALTER SYSTEM SET ssl = 'on';"])
-            run(['podman', 'exec', container, 'psql', '-U', 'postgres', '-d', 'postgres',
+            run(PODMAN + ['exec', container, 'psql', '-U', 'postgres', '-d', 'postgres',
                  '-c', "ALTER SYSTEM SET ssl_cert_file = '/tmp/server.crt';"])
-            run(['podman', 'exec', container, 'psql', '-U', 'postgres', '-d', 'postgres',
+            run(PODMAN + ['exec', container, 'psql', '-U', 'postgres', '-d', 'postgres',
                  '-c', "ALTER SYSTEM SET ssl_key_file = '/tmp/server.key';"])
-            run(['podman', 'restart', container])
+            run(PODMAN + ['restart', container])
             wait_for_postgres(container)
             for role in ('maas', 'metering'):
-                role_password = secrets.token_urlsafe(24)
-                run(['podman', 'exec', container, 'psql', '-U', 'postgres', '-d', 'postgres',
+                role_password = secrets.token_urlsafe(24) + '\n' + secrets.token_urlsafe(12)
+                run(PODMAN + ['exec', container, 'psql', '-U', 'postgres', '-d', 'postgres',
                      '-c', f"CREATE ROLE {role} LOGIN PASSWORD '{role_password}';"])
-                run(['podman', 'exec', container, 'psql', '-U', 'postgres', '-d', 'postgres',
+                run(PODMAN + ['exec', container, 'psql', '-U', 'postgres', '-d', 'postgres',
                      '-c', f'CREATE DATABASE {role} OWNER {role};'])
-                url = (f'postgresql://{role}:{role_password}@external-db.test:5432/{role}'
+                url = (f'postgresql://{role}:{quote(role_password, safe="")}@external-db.test:5432/{role}'
                        '?sslmode=verify-full')
                 environment = external_client_environment(url, role, True)
                 environment_file = certificates / f'{role}.env'
                 environment_file.write_text(''.join(f'{name}={value}\n'
                                                      for name, value in environment.items()))
+                password_file = certificates / f'{role}.password'
+                password_file.write_text(external_password_file(role_password))
+                shell_command = (
+                    '. /run/secrets/external-db-password\n'
+                    'exec psql -X -qAt -v ON_ERROR_STOP=1 -c '
+                    + shlex.quote("SELECT current_user || ':' || current_database()"))
                 result = subprocess.run(
-                    ['podman', 'run', '--rm', '--network', network, '--env-file', environment_file,
-                     '-v', f'{certificate}:/etc/pricetag-external-ca.crt:ro,Z', POSTGRES,
-                     'psql', '-X', '-qAt', '-c',
-                     "SELECT current_user || ':' || current_database()"],
+                    PODMAN + ['run', '--rm', '--network', network, '--env-file', environment_file,
+                     '-v', f'{certificate}:/etc/pricetag-external-ca.crt:ro,Z',
+                     '-v', f'{password_file}:/run/secrets/external-db-password:ro,Z',
+                     POSTGRES, 'sh', '-c', shell_command],
                     check=True, text=True, stdout=subprocess.PIPE).stdout.strip()
                 if result != f'{role}:{role}':
                     raise RuntimeError(f'unexpected connection identity: {result}')
             print('PASS: external MaaS and metering URLs connected over verified TLS')
         finally:
-            subprocess.run(['podman', 'rm', '-f', container],
+            subprocess.run(PODMAN + ['rm', '-f', container],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(['podman', 'network', 'rm', network],
+            subprocess.run(PODMAN + ['network', 'rm', network],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 

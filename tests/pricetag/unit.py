@@ -208,10 +208,31 @@ class PreparationTest(unittest.TestCase):
         environment = prepare.external_client_environment(url, 'maas', False)
         self.assertEqual(environment, {
             'PGHOST': 'db.example', 'PGPORT': '5432', 'PGUSER': 'maas',
-            'PGPASSWORD': 'p@ss/word', 'PGDATABASE': 'maas', 'PGSSLMODE': 'require'})
+            'PGDATABASE': 'maas', 'PGSSLMODE': 'require'})
+        self.assertEqual(prepare.external_password_file('p@ss/word\nnext line'),
+                         "PGPASSWORD='p@ss/word\nnext line'\n")
         rendered = prepare.external_application_url(url, False)
         self.assertIn('p%40ss%2Fword@db.example:5432/maas', rendered)
         self.assertIn('application_name=test', rendered)
+
+    def test_external_database_hostaddr_controls_helper_connections(self):
+        url = 'postgresql://maas:secret@db.example:5432/maas?sslmode=require&hostaddr=10.0.0.8'
+        parsed = prepare.validate_external_database_url(url)
+        self.assertEqual(parsed['hostaddr'], '10.0.0.8')
+        self.assertEqual(prepare.external_database_server(parsed), ('10.0.0.8', 5432))
+        environment = prepare.external_client_environment(url, 'maas', False)
+        self.assertEqual(environment['PGHOST'], 'db.example')
+        self.assertEqual(environment['PGHOSTADDR'], '10.0.0.8')
+
+    def test_external_database_urls_must_use_the_same_effective_server(self):
+        maas = 'postgresql://maas:secret@db.example:5432/maas?sslmode=require&hostaddr=10.0.0.8'
+        metering = 'postgresql://metering:secret@db.example:5432/metering?sslmode=require&hostaddr=10.0.0.9'
+        with self.assertRaisesRegex(ValueError, 'same effective database server'):
+            prepare.validate_external_database_urls(maas, metering)
+        matching = prepare.validate_external_database_urls(
+            maas, metering.replace('hostaddr=10.0.0.9', 'hostaddr=10.0.0.8'))
+        self.assertEqual(prepare.external_database_server(matching['maas']),
+                         prepare.external_database_server(matching['metering']))
 
     def test_external_application_url_normalizes_sslmode_case(self):
         rendered = prepare.external_application_url(
@@ -242,6 +263,7 @@ class PreparationTest(unittest.TestCase):
         with patch.object(external_database, 'service_prefix', return_value=['sudo']):
             command = external_database.client_command(Path('/etc/praxis-pricetag/external-maas-db.env'))
         self.assertIn('--env-file', command)
+        self.assertIn('/etc/praxis-pricetag/external-maas-db.password:/run/secrets/external-db-password:ro', command)
         rendered_command = ' '.join(map(str, command))
         self.assertNotIn('PGPASSWORD=', rendered_command)
         self.assertNotIn('p@ss/word', rendered_command)

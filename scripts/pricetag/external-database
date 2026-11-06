@@ -3,6 +3,7 @@
 import argparse
 from pathlib import Path
 import pwd
+import shlex
 import subprocess
 import sys
 
@@ -17,12 +18,18 @@ def service_prefix():
 
 
 def client_command(environment_file, command='SELECT 1'):
+    password_file = environment_file.with_suffix('.password')
     arguments = service_prefix() + ['podman', 'run', '--rm', '--network', 'pricetag-private',
                                     '--env-file', environment_file]
     if (DEPLOY / 'external-ca.crt').is_file():
         arguments += ['-v', f'{DEPLOY / "external-ca.crt"}:/etc/pricetag-external-ca.crt:ro']
-    arguments += [POSTGRES, 'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1']
-    arguments += ['-c', command]
+    arguments += ['-v', f'{password_file}:/run/secrets/external-db-password:ro']
+    shell_command = (
+        '. /run/secrets/external-db-password\n'
+        'exec psql -X -qAt -v ON_ERROR_STOP=1 '
+        f'-c {shlex.quote(command)}'
+    )
+    arguments += [POSTGRES, 'sh', '-c', shell_command]
     return arguments
 
 

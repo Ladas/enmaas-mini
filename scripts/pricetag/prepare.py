@@ -4,6 +4,7 @@ import argparse
 import copy
 import json
 import os
+import shlex
 from pathlib import Path
 import pwd
 import re
@@ -78,6 +79,9 @@ def validate_external_database_url(url_text, ca_file=None, ca_required=True):
     if not re.fullmatch(r'[A-Za-z0-9_.-]+', database):
         raise ValueError('external database URL must name a single maintenance database')
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    hostaddr = query.get('hostaddr')
+    if 'hostaddr' in query and not hostaddr:
+        raise ValueError('external database URL hostaddr must not be empty')
     sslmode = query.get('sslmode', '').lower()
     if sslmode not in ('require', 'verify-full'):
         raise ValueError('external database URL must set sslmode=require or sslmode=verify-full')
@@ -91,12 +95,28 @@ def validate_external_database_url(url_text, ca_file=None, ca_required=True):
     return {
         'scheme': parsed.scheme,
         'host': parsed.hostname,
+        'hostaddr': hostaddr,
         'port': parsed.port,
         'username': unquote(parsed.username),
         'password': unquote(parsed.password),
         'database': database,
         'sslmode': sslmode,
     }
+
+
+def external_database_server(config):
+    return config['hostaddr'] or config['host'], config['port']
+
+
+def validate_external_database_urls(maas_url, metering_url, ca_file=None):
+    external_database = {
+        'maas': validate_external_database_url(maas_url, ca_file),
+        'metering': validate_external_database_url(metering_url, ca_file),
+    }
+    if external_database_server(external_database['maas']) != \
+            external_database_server(external_database['metering']):
+        raise ValueError('external maas and metering URLs must use the same effective database server address and port')
+    return external_database
 
 
 def external_application_url(url_text, ca_configured):
@@ -122,15 +142,21 @@ def external_client_environment(url_text, expected_database, ca_configured):
         raise ValueError(f'external {expected_database} URL must use the {expected_database} role')
     values = {
         'PGHOST': config['host'],
+        **({'PGHOSTADDR': config['hostaddr']} if config['hostaddr'] else {}),
         'PGPORT': str(config['port']),
         'PGUSER': config['username'],
-        'PGPASSWORD': config['password'],
         'PGDATABASE': config['database'],
         'PGSSLMODE': config['sslmode'],
     }
     if ca_configured:
         values['PGSSLROOTCERT'] = '/etc/pricetag-external-ca.crt'
     return values
+
+
+def external_password_file(password):
+    if '\x00' in password:
+        raise ValueError('external database password must not contain a NUL byte')
+    return 'PGPASSWORD=' + shlex.quote(password) + '\n'
 
 
 def gateway_quadlet_body(image, provider_secrets, mount, mock_provider):
@@ -231,13 +257,8 @@ def main():
         try:
             maas_url = args.maas_database_url_file.read_text().strip()
             metering_url = args.metering_database_url_file.read_text().strip()
-            external_database = {
-                'maas': validate_external_database_url(maas_url, args.external_database_ca_file),
-                'metering': validate_external_database_url(metering_url, args.external_database_ca_file),
-            }
-            if (external_database['maas']['host'], external_database['maas']['port']) != \
-                    (external_database['metering']['host'], external_database['metering']['port']):
-                raise ValueError('external maas and metering URLs must use the same database server address and port')
+            external_database = validate_external_database_urls(
+                maas_url, metering_url, args.external_database_ca_file)
         except (OSError, ValueError) as error:
             parser.error(str(error))
     os.umask(0o077)
@@ -281,6 +302,10 @@ def main():
             shutil.copyfile(args.external_database_ca_file, args.directory / 'external-ca.crt')
         env('external-metering-db.env', external_client_environment(metering_url, 'metering', ca_configured))
         env('external-maas-db.env', external_client_environment(maas_url, 'maas', ca_configured))
+        (args.directory / 'external-metering-db.password').write_text(
+            external_password_file(external_database['metering']['password']))
+        (args.directory / 'external-maas-db.password').write_text(
+            external_password_file(external_database['maas']['password']))
         metering_url = external_application_url(metering_url, ca_configured)
         maas_url = external_application_url(maas_url, ca_configured)
     m2m_secret = secrets.token_urlsafe(48)
