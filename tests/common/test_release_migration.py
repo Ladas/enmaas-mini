@@ -1,6 +1,8 @@
 """Release references and migration instructions must agree across entry points."""
 import importlib.util
 from pathlib import Path
+import subprocess
+import sys
 import unittest
 
 import yaml
@@ -12,6 +14,18 @@ spec.loader.exec_module(installer)
 
 
 class ReleaseMigrationTest(unittest.TestCase):
+    def test_metadata_import_is_independent_of_gateway_test_fixture(self):
+        result = subprocess.run([sys.executable, '-c', '''
+import runpy, sys, types
+sys.modules['gateway'] = types.ModuleType('gateway')
+original_path = list(sys.path)
+runpy.run_path(sys.argv[1])
+assert sys.path == original_path
+assert 'prepare' not in sys.modules
+''', str(ROOT / 'tests/pricetag/published-images.py')],
+            capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_public_image_check_rejects_wrong_architecture_and_revision(self):
         spec = importlib.util.spec_from_file_location('published_images', ROOT / 'tests/pricetag/published-images.py')
         images = importlib.util.module_from_spec(spec)

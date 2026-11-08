@@ -10,11 +10,6 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
-spec = importlib.util.spec_from_file_location('installer', ROOT / 'scripts/pricetag/install.py')
-installer = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(installer)
-sys.path.insert(0, str(ROOT / 'scripts/pricetag'))
-from prepare import POSTGRES
 
 
 def verify_metadata(metadata, revision=None):
@@ -29,6 +24,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--engine', choices=('docker', 'podman'), default='docker')
     args = parser.parse_args()
+    # Load deployment dependencies only in the standalone CLI process. Unit
+    # discovery also imports a test fixture named gateway in its own process.
+    spec = importlib.util.spec_from_file_location('installer', ROOT / 'scripts/pricetag/install.py')
+    installer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(installer)
+    sys.path.insert(0, str(ROOT / 'scripts/pricetag'))
+    from prepare import POSTGRES
+
     images = (
         ('Praxis', installer.PRAXIS_IMAGE, installer.PRAXIS_REVISION),
         ('MaaS', installer.PUBLISHED_MAAS_IMAGE, installer.MAAS_COMMIT),
