@@ -17,7 +17,7 @@ The tested VM has 8 vCPUs, 32 GiB RAM and 150 GiB disk. No GPU is needed.
 
 ## 1. Set the connection
 
-Run from your checked-out `secure-single-server` repository on your workstation:
+Run from your checked-out `enmaas-mini` repository on your workstation:
 
 ```console
 RHEL_HOST=ec2-user@YOUR_SERVER_IP

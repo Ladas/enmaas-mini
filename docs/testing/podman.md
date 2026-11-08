@@ -17,7 +17,7 @@ a protected service account.
 
 ```console
 sudo dnf install -y podman
-cd secure-single-server
+cd enmaas-mini
 ```
 
 ## 2. Select credentials

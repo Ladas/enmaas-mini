@@ -12,7 +12,7 @@ Clone the repository into your preferred parent directory:
 ```console
 cd /path/to/your/projects
 git clone https://github.com/redhat-et/enmaas-mini.git
-cd secure-single-server
+cd enmaas-mini
 ```
 
 If already cloned, enter your existing checkout instead. In the same terminal,

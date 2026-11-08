@@ -4,7 +4,7 @@
 [![Deploy documentation](https://github.com/redhat-et/enmaas-mini/actions/workflows/pages.yml/badge.svg)](https://github.com/redhat-et/enmaas-mini/actions/workflows/pages.yml)
 
 enMAAS Mini is an experimental model-gateway project focused on
-[Praxis](https://github.com/praxis/praxis), PriceTag, and the supporting
+[Praxis](https://github.com/praxis-proxy/praxis), PriceTag, and the supporting
 deployment components needed to run them on a small RHEL footprint.
 
 > [!IMPORTANT]
