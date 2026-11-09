@@ -16,6 +16,18 @@ perf=importlib.util.module_from_spec(spec);loader.exec_module(perf)
 
 
 class Load(unittest.TestCase):
+    def test_verification_targets_the_upgrade_clone(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report=Path(directory)/'report.json'
+            report.write_text(json.dumps({'phases':[{'samples':[{'subject':'perf-one','ok':True}]}]}))
+            args=SimpleNamespace(report=report,database_name='metering_upgrade_fixture',database='test-db',service_user=None)
+            with patch.object(perf.subprocess,'check_output',return_value='perf-one|1|2|3|5\n') as query:
+                self.assertEqual(perf.verify(args),0)
+                command=query.call_args.args[0]
+                self.assertEqual(command[command.index('-d')+1],'metering_upgrade_fixture')
+            args.database_name='host=another-server'
+            with self.assertRaises(ValueError):perf.verify(args)
+
     def test_multiple_streams_per_user_and_expected_throttling(self):
         class Reply:
             status=429

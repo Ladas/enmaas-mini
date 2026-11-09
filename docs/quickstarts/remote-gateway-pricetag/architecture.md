@@ -151,6 +151,12 @@ business changes. A revoked/expired inference key cannot validate again, but
 **key revocation does not invalidate an existing browser session**. Suspension
 blocks the account. See [users and offboarding](users.md#limits).
 
+The latest-upstream source candidate uses `/account` and the owner-scoped
+`/api/v1/me/usage/*` and `/api/v1/me/keys` APIs. Aggregate dashboard APIs stay
+administrator-only. The gateway exposes explicit approved routes; PriceTag
+validates the session and applies identity/role checks. The previous published
+release uses `/management` for personal keys; see [image selection](images.md).
+
 ### Certificates, secrets and private peers
 
 The installer creates a private CA and server certificate. Clients trust the

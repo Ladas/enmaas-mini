@@ -9,17 +9,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
 from unified_config import active, catalog, render as unified, validate
 
 INFERENCE = ['/v1/chat/completions', '/v1/responses', '/v1/messages']
-DASHBOARD = ['/', '/login', '/logout', '/dashboard', '/admin', '/manager', '/me', '/welcome',
+DASHBOARD = ['/', '/login', '/logout', '/dashboard', '/admin', '/manager', '/me', '/welcome', '/account',
              '/management', '/admin/impersonate', '/me/keys', '/whoami', '/api/v1/whoami', '/api/v1/pricing',
              '/api/v1/dashboard/overview', '/api/v1/dashboard/groups',
              '/api/v1/dashboard/users', '/api/v1/dashboard/directory-users',
              '/api/v1/dashboard/models', '/api/v1/dashboard/tools',
+             '/api/v1/dashboard/geo', '/api/v1/dashboard/cost-centers',
              '/api/v1/dashboard/timeline', '/api/v1/dashboard/recent',
+             '/api/v1/me/usage/summary', '/api/v1/me/usage/models', '/api/v1/me/usage/recent',
+             '/api/v1/me/keys',
              '/api/v1/admin/safety-net', '/api/v1/admin/models', '/api/v1/admin/partner-users',
              '/api/v1/admin/model-policies', '/api/v1/admin/pricing-discounts',
              '/api/v1/admin/pricing/refresh', '/api/v1/admin/pricing/reprice', '/api/v1/org/scope',
              '/api/v1/org/usage', '/api/v1/org/person', '/api/v1/org/charts']
-DASHBOARD_PREFIXES = ['/api/v1/management/', '/me/keys/', '/api/v1/admin/partner-users/', '/api/v1/admin/pricing/reprice/']
+DASHBOARD_PREFIXES = ['/api/v1/management/', '/me/keys/', '/api/v1/me/keys/', '/api/v1/admin/partner-users/', '/api/v1/admin/pricing/reprice/']
 
 
 def render(original, models, origins=None):

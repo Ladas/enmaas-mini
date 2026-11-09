@@ -2,7 +2,8 @@
 
 Start with the [quickstart](README.md). Use synthetic providers on a dedicated
 host for budget-exhaustion tests; real-provider requests incur charges.
-Use the [default published demo images](images.md) for the complete flow below.
+Use the [latest-upstream source candidate](images.md) for the account and key
+screens described below. The previous published release has different personal-key navigation.
 Provider/model routing is configured through the CLI; the optional provider editor
 is not included.
 
@@ -42,8 +43,8 @@ creating a price entry alone does not expose a model.
 | Signed-in role | View | What to show |
 | --- | --- | --- |
 | Superadmin | **Usage** (`/dashboard`) | Aggregate requests, models, tokens and USD spending; filter to a user or model. **Administration** (`/admin`) contains management controls. |
-| User | **Usage** (`/dashboard`) | Their own charts and recent activity, plus monthly spend/allowance. Usage belongs to the identity, not the particular key used to sign in. |
-| Manager | **Usage** (`/dashboard`) | Their personal usage only. |
+| User | **My usage** (`/account`) | Their own charts and recent activity, plus monthly spend/allowance. Usage belongs to the identity, not the particular key used to sign in. |
+| Manager | **My usage** (`/account`) | Their personal usage only. |
 | Manager | **My team** (`/manager`) | Their reporting subtree, team charts and member budgets. Drill into a member; unrelated teams remain inaccessible. |
 
 Choose a time range containing the requests and use **Refresh**. Monthly budget
@@ -66,7 +67,7 @@ As superadmin, open **Administration → User keys**:
    **Cancel** or Escape keeps the current view; direct URLs use a styled confirmation page.
 3. Show the **Viewing as** banner. Personal Usage must contain only the selected
    identity; the team view must contain only that identity's authorized subtree.
-4. Choose **Back to admin view** in the banner and confirm. Aggregate Usage and
+4. Choose **Return to administrator view** in the personal-view banner and confirm. Aggregate Usage and
    administrator controls are available again.
 
 Impersonation is read-only: it does not grant the target your administrator
@@ -121,13 +122,14 @@ See [pricing operations](pricing.md) for refresh, catalog and repricing examples
 
 ## 6. Replace keys and offboard
 
-1. Sign in as the user and open **My keys** (`/management`), then the **Create key** tab. Create another key
+1. Sign in as the user and open **My usage → API keys** (`/account?tab=keys`), then **Create key**. Create another key
    with a distinct name and allowed finite lifetime. Deliberate additional keys
    are supported; repeated submissions while creation is pending are ignored.
-2. **Copy key** or **Download .key**, then **Dismiss key**. The secret is not
-   displayed and cannot be retrieved later. Update OpenCode's key-file path,
+2. Copy or **Download .key**, confirm **I've saved this key in a safe place**, then
+   **Done**. The secret is hidden by default; **Show** reveals it for this one-time
+   delivery. It cannot be retrieved later. Update OpenCode's key-file path,
    restart it and verify inference. Both keys work until one expires or is revoked.
-3. In **My keys**, search by name or key ID and **Revoke** the old key.
+3. In **API keys**, search by name or key ID and **Revoke** the old key.
    Use **Status** to show Active, Revoked, Expired or All keys. The table shows
    expiry and remaining lifetime, with five rows per page by default.
    Revocation preserves the record for audit; it does not permanently delete it.

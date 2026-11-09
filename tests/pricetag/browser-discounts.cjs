@@ -37,5 +37,22 @@ let stage='setup';
   stage='UI half-price policy';await policy(policyFor(.5));const after=await rates();
   assert.ok(Math.abs(after.input_cost_per_mtok-before.input_cost_per_mtok*.5)<1e-9);assert.ok(Math.abs(after.output_cost_per_mtok-before.output_cost_per_mtok*.5)<1e-9);
   console.log('PASS: UI discount policy persisted, refresh halved imported rates');
+  for(const status of [503,200]){
+   stage='saved policy with failed rate refresh '+status;
+   await admin.goto(base+'/admin');await admin.locator('#vtab-pricing-discounts').click();await admin.locator('#pricing-discount-version').waitFor();
+   let refreshes=0;
+   const pattern='**/api/v1/admin/pricing/refresh';
+   await admin.route(pattern,route=>{refreshes++;return route.fulfill({status,contentType:'application/json',body:JSON.stringify({error:'synthetic refresh failure'})});});
+   try{
+    await admin.getByRole('button',{name:'Save pricing policy',exact:true}).click();
+    const warning=admin.locator('#pricing-discounts-body .err-msg');await warning.waitFor();
+    assert.match(await warning.textContent(),/Policy saved, but rate refresh failed/);
+    assert.equal(refreshes,1,'a failed refresh must not be retried automatically');
+    const saved=await admin.evaluate(async()=>await(await fetch('/api/v1/admin/pricing-discounts')).json());
+    assert.equal(saved.version,policyFor(.5).version);
+    assert.equal((await rates()).input_cost_per_mtok,after.input_cost_per_mtok);
+   }finally{await admin.unroute(pattern);}
+  }
+  console.log('PASS: HTTP and application refresh failures remain visible; saved policy and effective rates are distinguished');
  }finally{try{if(originalPolicy){await policy(originalPolicy);console.log('Original discount policy restored through UI');}}finally{await browser.close();}}
 })().catch(()=>{console.error('FAIL at '+stage+'; credentials and sensitive details withheld');process.exitCode=1});

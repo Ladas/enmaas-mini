@@ -60,7 +60,7 @@ jobs:
           # Independent of private registries or provider credentials. Use the
           # reviewed source candidate, independently of published image digests.
           maas=6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d
-          metering=ce9c6c51b8dff178637003945b517255c54fc853
+          metering=b1c5ce0e82b4bd63525a7eccd9ecd4d010e153d5
           for component in maas metering; do
             directory="$RUNNER_TEMP/$component"
             if [[ "$component" == maas ]]; then

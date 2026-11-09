@@ -1,18 +1,21 @@
 # Management demo on RHEL
 
-**Mock demo:** use a dedicated benchmark VM and the pinned published management
-images. All inference is synthetic; no real provider credentials are needed.
+**Mock demo:** use a dedicated benchmark VM. This branch's UI tests target the
+latest-upstream source candidate; published defaults still contain the previous
+account/key UI. All inference is synthetic; no real provider credentials are needed.
 
 ## Install on a fresh benchmark host
 
-Run from the copied checkout on RHEL. The installer pulls the pinned published
-images, imports them and starts the Quadlet services with two synthetic
-model aliases. No real provider credentials are accepted.
+Run from the copied checkout on RHEL. The installer builds the pinned application
+sources, imports them and starts Quadlet services with synthetic model aliases.
+No real provider credentials are accepted.
 
 ```sh
 read -r -p 'Gateway IP or DNS: ' GATEWAY_HOST
 sudo scripts/pricetag/install --hostname "$GATEWAY_HOST" \
-  --mode mock --demo-fixture --yes
+  --mode mock --demo-fixture --yes --image-mode source \
+  --maas-revision 6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d \
+  --metering-revision b1c5ce0e82b4bd63525a7eccd9ecd4d010e153d5
 ```
 
 Keep TCP 8443 restricted to the testing IPs. Existing deployments are refused.

@@ -71,6 +71,7 @@ def check_sample(record):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--database-name', default='metering', help='ledger database; set explicitly for an upgrade clone')
     parser.add_argument('--requests', type=int, choices=range(1, 1001), default=100,
                         help='requests per user per phase; default 100 gives 3600 requests')
     parser.add_argument('--concurrency', type=int, nargs='+', choices=range(1, 21), default=[1, 5, 10, 20])
@@ -78,6 +79,8 @@ def main():
     if os.geteuid() != 0:
         parser.error('run with sudo on the mock-only RHEL server')
     require_mock(DEPLOY)
+    if not re.fullmatch(r'[a-z_][a-z0-9_]{0,62}', args.database_name):
+        parser.error('invalid database name')
     selected_model = json.loads((DEPLOY / 'models.json').read_text())[0]['id']
     owner = pwd.getpwnam('praxis-svc')
     prefix = ['sudo', '-u', 'praxis-svc', 'env', f'XDG_RUNTIME_DIR=/run/user/{owner.pw_uid}',
@@ -93,7 +96,7 @@ def main():
     with (output / 'observe.jsonl').open('x') as stream:
         def sample():
             nonlocal initial_restarts
-            record = observer.sample(prefix)
+            record = observer.sample(prefix, args.database_name)
             stream.write(json.dumps(record) + '\n')
             stream.flush()
             records.append(record)
@@ -128,7 +131,7 @@ def main():
                     load.kill()
                     load.wait()
         subprocess.run(common + ['verify', '--report', str(output / 'requests.json'),
-                       '--database', 'pricetag-db', '--service-user', 'praxis-svc'], check=True, cwd='/tmp')
+                       '--database', 'pricetag-db', '--database-name', args.database_name, '--service-user', 'praxis-svc'], check=True, cwd='/tmp')
         sample()
     report = json.loads((output / 'requests.json').read_text())
     summary = {'result': 'passed', 'synthetic_provider': True, 'exact_accounting': True,

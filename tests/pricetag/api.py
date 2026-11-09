@@ -9,6 +9,11 @@ loader=importlib.machinery.SourceFileLoader('api',str(ROOT/'scripts/pricetag/api
 spec=importlib.util.spec_from_loader(loader.name,loader);api=importlib.util.module_from_spec(spec);loader.exec_module(api)
 
 class Contracts(unittest.TestCase):
+ def test_personal_account_routes_are_explicit(self):
+  for route in ['/api/v1/me/keys','/api/v1/me/keys/key-id','/api/v1/me/usage/summary','/api/v1/me/usage/models','/api/v1/me/usage/recent']:
+   self.assertEqual(api.endpoint('https://example.test',route)[1],route)
+  for route in ['/api/v1/me/admin','/api/v1/me/keys-extra','/api/v1/me/usage/summary/other','/api/v1/me/usage/summary?user=other']:
+   with self.assertRaises(ValueError):api.endpoint('https://example.test',route)
  def test_rejects_credential_redirect_destinations(self):
   for origin,path in [('http://example.test','/me/keys'),('https://user:password@example.test','/me/keys'),('https://example.test','//other.test/me/keys'),('https://example.test','/api/v1/admin/../events'),('https://example.test','/api/v1/events')]:
    with self.assertRaises(ValueError):api.endpoint(origin,path)

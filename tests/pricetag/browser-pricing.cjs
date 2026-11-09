@@ -43,7 +43,7 @@ let stage='setup';
   stage='first charge';await infer();await spend(user,.008);
   stage='change future rate through UI';await price(admin,'fixture-cheap',2000,2000);await spend(user,.008);
   stage='second charge preserves history';await infer();await spend(user,.018);
-  const models=await user.evaluate(async()=>await(await fetch('/api/v1/dashboard/models')).json());
+  const models=await user.evaluate(async()=>await(await fetch('/api/v1/me/usage/models')).json());
   console.log('PASS: UI rates changed; first charge stayed $0.008; second request charged $0.010; total $0.018');
   assert.deepEqual(models.map(m=>m.model),['fixture-cheap']);
   console.log('PASS: usage is attributed to the upstream model; no alias price update was needed');

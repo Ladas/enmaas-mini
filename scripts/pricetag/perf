@@ -149,6 +149,8 @@ def run(args):
 
 
 def verify(args):
+    if not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", args.database_name):
+        raise ValueError("invalid database name")
     report = json.loads(args.report.read_text())
     counts = {}
     for phase in report['phases']:
@@ -166,7 +168,7 @@ def verify(args):
     expected = {s: [n, n * 2, n * 3, n * 5] for s, n in counts.items() if n}
     for _ in range(30):
         raw = subprocess.check_output(prefix + ['podman', 'exec', args.database, 'psql', '-U', 'metering',
-            '-d', 'metering', '-At', '-c', query], text=True, cwd='/tmp')
+            '-d', args.database_name, '-At', '-c', query], text=True, cwd='/tmp')
         actual = {parts[0]: list(map(int, parts[1:])) for parts in (line.split('|') for line in raw.splitlines())}
         if actual == expected:
             print('PASS: exact per-user event and token totals match completed mock requests')
@@ -201,6 +203,7 @@ def main():
     p = commands.add_parser('verify')
     p.add_argument('--report', type=Path, required=True)
     p.add_argument('--database', default='praxis-pricetag-db')
+    p.add_argument('--database-name', default='metering', help='ledger database; set explicitly for an upgrade clone')
     p.add_argument('--service-user')
     args = parser.parse_args()
     if args.command == 'run' and max(args.concurrency) * args.lanes > 512:
