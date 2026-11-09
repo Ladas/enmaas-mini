@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import pwd
+import re
 import subprocess
 import time
 
@@ -69,8 +70,10 @@ def command(argv, json_output=False):
     return json.loads(result.stdout) if json_output else result.stdout.strip()
 
 
-def sample(prefix):
+def sample(prefix, database_name="metering"):
     """Collect one timestamped health, service, and database snapshot."""
+    if not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", database_name):
+        raise ValueError("invalid database name")
     memory = {}
     for line in Path('/proc/meminfo').read_text().splitlines():
         name, value = line.split(':', 1)
@@ -106,7 +109,7 @@ def sample(prefix):
         if command(probe) != '1':
             database_user = 'metering'
         record['postgres'] = command(prefix + ['podman', 'exec', 'pricetag-db', 'psql', '-X', '-qAt',
-            '-U', database_user, '-d', 'metering', '-v', 'ON_ERROR_STOP=1', '-c', SQL], True)
+            '-U', database_user, '-d', database_name, '-v', 'ON_ERROR_STOP=1', '-c', SQL], True)
     record['journal_usage'] = command(['journalctl', '--disk-usage'])
     record['container_storage'] = command(prefix + ['podman', 'system', 'df', '--format', 'json'], True)
     record['log_config'] = {name: command(prefix + ['podman', 'inspect', '--format',
@@ -118,6 +121,7 @@ def main():
     """Continuously sample deployment health into a private JSONL file."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--database-name', default='metering', help='database to measure; set explicitly for an upgrade clone')
     parser.add_argument('--samples', type=int, default=1)
     parser.add_argument('--interval', type=int, default=30)
     args = parser.parse_args()
@@ -131,7 +135,7 @@ def main():
     os.umask(0o077)
     with args.output.open('x') as output:
         for index in range(args.samples):
-            record = sample(prefix)
+            record = sample(prefix, args.database_name)
             output.write(json.dumps(record) + '\n')
             output.flush()
             if record['disk_available_percent'] < 30:

@@ -488,7 +488,10 @@ def failures(gateway):
         for _ in range(2):
             before = len(gateway.records())
             try:
-                gateway.request(path, timeout=0.2)
+                # Include TLS and quota admission on loaded CI runners. The
+                # provider waits 10s, so this still proves client cancellation
+                # before its response, without a 200ms scheduling assumption.
+                gateway.request(path, timeout=3)
             except (TimeoutError, urllib.error.URLError) as error:
                 assert isinstance(getattr(error, "reason", error), TimeoutError), "unrelated transport failure"
             else:

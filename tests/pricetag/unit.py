@@ -44,6 +44,20 @@ external_database_loader.exec_module(external_database)
 
 
 class PreparationTest(unittest.TestCase):
+    def test_routing_requests_are_paced_without_retries(self):
+        spec = importlib.util.spec_from_file_location('paced_routing', ROOT / 'tests/pricetag/rhel-routing.py')
+        routing = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(routing)
+        with patch.object(routing.time, 'monotonic', side_effect=[10, 10.01, 10.05, 12]), \
+                patch.object(routing.time, 'sleep') as sleep:
+            pace = routing.RequestPacer()
+            pace.wait()
+            sleep.assert_not_called()
+            pace.wait()
+            self.assertAlmostEqual(sleep.call_args.args[0], .04)
+            pace.wait()
+            self.assertEqual(sleep.call_count, 1)
+
     def test_routing_negative_cases_do_not_reject_legacy_or_shared_aliases(self):
         spec = importlib.util.spec_from_file_location('routing_contract', ROOT / 'tests/pricetag/rhel-routing.py')
         routing = importlib.util.module_from_spec(spec)
@@ -168,6 +182,18 @@ class PreparationTest(unittest.TestCase):
         self.assertIn({'unless': {'path': '/api/v1/admin/models'}}, guard['conditions'])
         router = next(f for f in edge['filters'] if f['filter'] == 'router')
         self.assertIn({'path': '/api/v1/admin/models', 'cluster': 'dashboard'}, router['routes'])
+
+    def test_upstream_personal_and_admin_chart_routes_are_explicit(self):
+        original, models = prepare.mock_inputs()
+        edge = next(c for c in prepare.render(original, models)['filter_chains'] if c['name'] == 'edge')
+        routes = next(f for f in edge['filters'] if f['filter'] == 'router')['routes']
+        guard = next(f for f in edge['filters'] if f.get('body') == 'Route not available')
+        for path in ('/account', '/api/v1/me/keys', '/api/v1/me/usage/summary',
+                     '/api/v1/me/usage/models', '/api/v1/me/usage/recent',
+                     '/api/v1/dashboard/geo', '/api/v1/dashboard/cost-centers'):
+            self.assertIn({'path': path, 'cluster': 'dashboard'}, routes)
+            self.assertIn({'unless': {'path': path}}, guard['conditions'])
+        self.assertNotIn({'path_prefix': '/api/v1/', 'cluster': 'dashboard'}, routes)
 
     def test_pricing_management_routes_use_dashboard_authentication(self):
         original, models = prepare.mock_inputs()

@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 
-REPO_URL = "https://github.com/redhat-et/secure-single-server"
+REPO_URL = "https://github.com/redhat-et/enmaas-mini"
 DEFAULT_BRANCH = "main"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 

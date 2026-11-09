@@ -173,7 +173,7 @@ precedence over source capacities.
 Quotas are shared token allowances, not per-user, per-model or dollar budgets.
 Reservation expiry does not guarantee a refund. Valkey uses AOF `everysec`,
 which can lose roughly a second of writes on sudden failure. See
-[feature testing](../../testing/gateway-features.md) for qualification.
+[mock-provider testing](../../testing/mocked-provider.md) for qualification.
 
 ## Update the helpers on an existing VM
 
@@ -196,4 +196,4 @@ and keep the admin listener private.
 ## Next step
 
 Validate quotas with the [testing guide](../../testing/README.md) and compare
-supported combinations in the [compatibility matrix](../../testing/compatibility.md).
+supported combinations during deployment qualification.

@@ -1,5 +1,6 @@
 'use strict';
 const downloadKey=require('./key-download.cjs');
+const account=require('./account-ui.cjs');
 require('./mock-guard.cjs')();
 const {chromium}=require('playwright');
 const fs=require('node:fs'),path=require('node:path');
@@ -21,14 +22,13 @@ let stage='setup';
   await admin.locator('#user [name=subject]').fill(subject);await admin.locator('#user [name=name]').fill('Offboarding verification');await done(admin,()=>admin.getByRole('button',{name:'Save user',exact:true}).click());
   await admin.locator('#vtab-user-keys').click();await admin.locator('#onboard [name=subject]').selectOption(subject);await admin.locator('#onboard [name=expiresIn]').fill('1d');await done(admin,()=>admin.getByRole('button',{name:'Issue key',exact:true}).click());
   const issued=await downloadKey(admin, '#onboardKey');await admin.locator('#onboardKey').getByRole('button',{name:'Dismiss key',exact:true}).click();
-  const {page:user}=await login(issued.key);user.on('dialog', dialog=>dialog.accept());await user.goto(base+'/management');
-  stage='personal key creation';await user.getByRole('tab',{name:'Create key',exact:true}).click();await user.locator('#key [name=name]').fill('own-key');await user.locator('#key [name=expiresIn]').fill('1h');await done(user,()=>user.locator('#key button').click());
-  const personal=await downloadKey(user, '#newKey');
+  const {page:user}=await login(issued.key);user.on('dialog', dialog=>dialog.accept());await account.open(user,base);
+  stage='personal key creation';const personal=await account.create(user,'own-key','1h');
   async function infer(key){return await user.evaluate(async key=>{
    const r=await fetch('/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+key},body:JSON.stringify({model:'mock/demo-cheap',messages:[{role:'user',content:'offboarding check'}],max_completion_tokens:16})});await r.text();return r.status;
   },key);}
   assert.equal(await infer(personal.key),200);
-  stage='personal budget display';await user.goto(base+'/dashboard');await user.locator('#standalone-budget').waitFor({state:'visible'});
+  stage='personal budget display';await user.goto(base+'/account');await user.waitForFunction(()=>document.querySelector('#kpi-budget-note').textContent.includes(' of '));
   stage='UI deactivate';await admin.locator('#vtab-people').click();await admin.locator('#user [name=active]').selectOption('false');await done(admin,()=>admin.getByRole('button',{name:'Save user',exact:true}).click());
   // Gateway authentication/admission may have bounded caches.
   await new Promise(r=>setTimeout(r,17000));

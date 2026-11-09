@@ -5,14 +5,14 @@ This is an optional test-host example for the
 Requires AWS CLI, `jq`, Python 3 and SSH on your workstation.
 
 Run on an AWS administrator workstation from a reviewed checkout of
-`redhat-et/secure-single-server`. The AWS helper creates encrypted root disks
+`redhat-et/enmaas-mini`. The AWS helper creates encrypted root disks
 and security groups restricted to the workstation's public IPv4 `/32`.
 Clone the repository into your preferred parent directory:
 
 ```console
 cd /path/to/your/projects
-git clone https://github.com/redhat-et/secure-single-server.git
-cd secure-single-server
+git clone https://github.com/redhat-et/enmaas-mini.git
+cd enmaas-mini
 ```
 
 If already cloned, enter your existing checkout instead. In the same terminal,

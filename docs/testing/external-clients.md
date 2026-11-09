@@ -69,9 +69,9 @@ harness use needs the connection details and caller token, without that export.
 
 ## Prepare the gateway and client
 
-Use [AWS deployment](aws.md) and [RHEL smoke testing](rhel-smoke.md) to prepare
+Use [AWS deployment](aws.md) and the [testing guide](README.md) to prepare
 a remote-gateway with synthetic providers. Complete mock acceptance before
-[real Qwen setup](rhel-real.md). Use the matching reviewed checkout on both
+real Qwen setup. Use the matching reviewed checkout on both
 machines; the test bundle includes `tests/remote-client/`. Do not run these
 tests against the existing all-in-one installations.
 
@@ -163,5 +163,5 @@ issued caller can also authenticate.
 For each supported harness, record whether the valid JWT completes the tool task,
 which invalid-token cases return `401`, and whether TLS verification succeeds
 with the supplied CA. Repeat the same client setup against the deployed remote
-gateway. Update the [remote-gateway results](compatibility.md#remote-gateway)
+gateway. Update the deployment qualification record
 only after that run; local Podman results do not establish RHEL deployment health.

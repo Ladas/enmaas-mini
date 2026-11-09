@@ -22,6 +22,22 @@ import metering_admin
 from contracts import check
 
 
+class RequestPacer:
+    """Keep functional probes below the gateway's 30 requests/s limit."""
+
+    def __init__(self):
+        self.previous = None
+
+    def wait(self):
+        now = time.monotonic()
+        if self.previous is not None:
+            remaining = .05 - (now - self.previous)
+            if remaining > 0:
+                time.sleep(remaining)
+                now = time.monotonic()
+        self.previous = now
+
+
 def invalid_bodies(body, upstream_id, public_aliases):
     """Build negative requests without rejecting a configured public alias."""
     invalid = [{**body, 'model': 'unknown/model'}, {}, b'{"model":']
@@ -45,8 +61,12 @@ def main():
     tls = ssl.create_default_context(cafile=str(deploy / 'ca.pem'))
     client = urllib.request.build_opener(urllib.request.ProxyHandler({}), metering_admin.NoRedirect(),
                                         urllib.request.HTTPSHandler(context=tls))
+    pace = RequestPacer()
 
     def request(path, body=None, headers=None, method=None, opener=client):
+        # Fast, zero-delay mock streams can otherwise exhaust the admission
+        # bucket. Pace once before each attempt; never replay inference calls.
+        pace.wait()
         if body is not None and not isinstance(body, bytes):
             body = json.dumps(body).encode()
         req = urllib.request.Request('https://localhost:8443' + path, body, method=method,
@@ -119,9 +139,9 @@ def main():
                               {'Origin': origin, 'Content-Type': 'application/x-www-form-urlencoded'}, opener=browser)
             assert code == 302
             for _ in range(30):
-                code, raw = request('/api/v1/dashboard/overview?range=mtd', opener=browser)
+                code, raw = request('/api/v1/me/usage/summary?range=mtd', opener=browser)
                 assert code == 200
-                overview = json.loads(raw)
+                overview = json.loads(raw)['overview']
                 if overview['total_requests'] >= successful + counted:
                     break
                 time.sleep(1)
@@ -129,7 +149,7 @@ def main():
             assert overview['total_requests'] == successful + counted, ('accounting count', overview['total_requests'], successful + counted)
             assert overview['total_tokens'] == successful * 5
             assert overview['active_users'] == 1
-            code, raw = request('/api/v1/dashboard/recent?range=mtd', opener=browser)
+            code, raw = request('/api/v1/me/usage/recent?range=mtd', opener=browser)
             rows = json.loads(raw)
             assert code == 200 and rows and all(row['username'] == subject for row in rows)
             assert all(row['model'] in {m['model'] for m in models} for row in rows)

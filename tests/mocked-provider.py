@@ -14,7 +14,7 @@ from evidence import save
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--suite", choices=("praxis", "offline", "gateways", "openshell"), default="praxis")
+    parser.add_argument("--suite", choices=("praxis", "offline", "gateways"), default="praxis")
     parser.add_argument("--engine", choices=("docker", "podman"), default=os.environ.get("CONTAINER_ENGINE", "podman"))
     args = parser.parse_args()
     os.environ["CONTAINER_ENGINE"] = args.engine
@@ -25,7 +25,6 @@ def main():
         commands += [[sys.executable, path] for path in ("tests/remote-gateway/credentials.py",
             "tests/remote-gateway/security.py", "tests/aws/plan.py", "tests/aws/session.py", "tests/aws/https-access.py",
             "tests/rhel/smoke.py", "tests/rhel/unit.py", "tests/rhel/users.py", "tests/rhel/providers.py", "tests/rhel/vllm.py", "tests/rhel/clients.py", "tests/rhel/features-test.py", "tests/pricetag/unit.py", "tests/pricetag/providers.py", "tests/pricetag/install.py", "tests/pricetag/metering-admin.py", "tests/pricetag/manage.py", "tests/pricetag/api.py", "tests/pricetag/perf.py", "tests/pricetag/capacity-export.py")]
-        commands += [[sys.executable, "tests/llm-d-sc/unit.py"]]
     if args.suite == "praxis":
         commands += [["bash", "tests/shared-gateway-image.sh"], ["bash", "tests/shared-gateway-valkey-image.sh"]]
     if args.suite in ("praxis", "gateways"):
@@ -38,18 +37,10 @@ def main():
                      for scenario in ("all-in-one", "remote")]
         commands += [[sys.executable, "tests/rhel/features-image.py", "--scenario", scenario, *backend]
                      for scenario in ("all-in-one", "remote") for backend in ([], ["--valkey"])]
-    if args.suite == "openshell":
-        commands += [[sys.executable, "openshell/tests/regressions.py"],
-                     [sys.executable, "tests/github/test_upstream_watch.py"],
-                     [sys.executable, "openshell/tests/gateway.py"],
-                     [sys.executable, "openshell/tests/probe-test.py"],
-                     [sys.executable, "tests/openshell-praxis/offline.py"],
-                     [sys.executable, "tests/openshell-praxis/schema.py"]]
     result = {"suite": args.suite, "engine": args.engine, "status": "running", "checks": [],
-              "openshell_runtime": "not run: separate manual disposable-RHEL qualification lane",
-              "roadmap": {"phase_1": "gateway contracts; native RHEL and real harness tasks remain separate",
+              "roadmap": {"phase_1": "gateway contracts; native RHEL tasks remain separate",
                           "phase_5": "shared quotas and MaaS API-key checks; no personal/hierarchical quotas",
-                          "phase_6": "harness/configuration contracts only; no retained-session or inference qualification"}}
+                          "phase_6": "gateway/configuration contracts only; no retained-session or inference qualification"}}
     try:
         for command in commands:
             print("RUN " + " ".join(command), flush=True)

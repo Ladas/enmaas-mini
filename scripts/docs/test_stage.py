@@ -9,101 +9,40 @@ import stage
 
 
 class StageTests(unittest.TestCase):
-    def test_public_testing_and_pricetag_guides_are_staged(self):
-        destination = stage.STAGE / "test-stage"
+    def staged_paths(self, name: str, pattern: str) -> set[str]:
+        destination = stage.STAGE / name
         try:
             stage.stage_docs(destination)
-            staged_paths = {
+            return {
                 path.relative_to(destination).as_posix()
-                for path in destination.rglob("*.md")
+                for path in destination.rglob(pattern)
             }
         finally:
             shutil.rmtree(destination)
 
-        self.assertIn("docs/testing/README.md", staged_paths)
-        self.assertIn("docs/testing/compatibility.md", staged_paths)
-        self.assertIn("docs/testing/pricetag.md", staged_paths)
-        self.assertIn("docs/testing/aws-pricetag.md", staged_paths)
-        self.assertIn("docs/testing/pricetag-perf.md", staged_paths)
-        self.assertNotIn("docs/testing/aws.md", staged_paths)
-        self.assertNotIn("docs/testing/rhel-real.md", staged_paths)
+    def test_published_testing_guides_are_staged(self):
+        staged_paths = self.staged_paths("test-stage", "*.md")
+        for path in (
+            "docs/testing/README.md",
+            "docs/testing/aws.md",
+            "docs/testing/aws-operations.md",
+            "docs/testing/mocked-provider.md",
+            "docs/testing/pricetag.md",
+            "docs/testing/aws-pricetag.md",
+            "docs/testing/pricetag-perf.md",
+        ):
+            self.assertIn(path, staged_paths)
 
-    def test_published_static_pages_are_staged(self):
-        destination = stage.STAGE / "test-static-stage"
-        try:
-            stage.stage_docs(destination)
-            staged_paths = {
-                path.relative_to(destination).as_posix()
-                for path in destination.rglob("*.html")
-            }
-        finally:
-            shutil.rmtree(destination)
-
-        self.assertIn(
-            "docs/examples/document-exfiltration/visual-demo.html",
-            staged_paths,
-        )
-        self.assertIn(
-            "docs/slides/secure-single-server-overview.html", staged_paths
-        )
-        self.assertTrue(
-            all(
-                path.endswith("/visual-demo.html")
-                or path.startswith("docs/slides/")
-                for path in staged_paths
-            ),
-            staged_paths,
-        )
-
-    def test_roadmap_is_not_staged(self):
-        destination = stage.STAGE / "test-roadmap-stage"
-        try:
-            stage.stage_docs(destination)
-            staged_paths = {
-                path.relative_to(destination).as_posix()
-                for path in destination.rglob("*.md")
-            }
-        finally:
-            shutil.rmtree(destination)
-
+    def test_removed_legacy_documents_are_not_staged(self):
+        staged_paths = self.staged_paths("test-legacy-stage", "*.md")
         self.assertNotIn("docs/roadmap.md", staged_paths)
+        self.assertNotIn("docs/testing/compatibility.md", staged_paths)
+        self.assertNotIn("docs/testing/compatibility.md", staged_paths)
 
-    def test_unpublished_component_documents_are_not_staged(self):
-        destination = stage.STAGE / "test-component-stage"
-        try:
-            stage.stage_docs(destination)
-            staged_paths = {
-                path.relative_to(destination).as_posix()
-                for path in destination.rglob("*.md")
-            }
-        finally:
-            shutil.rmtree(destination)
-
-        self.assertNotIn("openshell/docs/upgrade.md", staged_paths)
-        self.assertNotIn("openshell/REVIEW-FOLLOWUP.md", staged_paths)
-
-    def test_reference_documents_are_not_staged(self):
-        destination = stage.STAGE / "test-reference-stage"
-        try:
-            stage.stage_docs(destination)
-            staged_paths = {
-                path.relative_to(destination).as_posix()
-                for path in destination.rglob("*.md")
-            }
-        finally:
-            shutil.rmtree(destination)
-
-        self.assertNotIn("docs/development/workload-templates.md", staged_paths)
-        self.assertNotIn(
-            "docs/development/sandbox-use-case-analysis.md", staged_paths
-        )
-        self.assertNotIn(
-            "docs/development/review-turn-stdin-hang.md", staged_paths
-        )
-        self.assertNotIn("docs/development/documentation-site.md", staged_paths)
-        self.assertNotIn(
-            "docs/examples/opencode-pr-queue/demo-task.md", staged_paths
-        )
+    def test_component_readmes_are_staged(self):
+        staged_paths = self.staged_paths("test-component-stage", "*.md")
+        self.assertIn("bootc/README.md", staged_paths)
+        self.assertIn("bootc/VLLM.md", staged_paths)
 
 
 if __name__ == "__main__":

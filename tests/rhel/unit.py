@@ -45,32 +45,6 @@ class EvidenceTest(unittest.TestCase):
                 gateway = integration.InstalledGateway(Namespace(scenario="all-in-one", provider="vllm", real=real))
             self.assertEqual(gateway.model, expected)
 
-    def test_openshell_cleanup_waits_for_owned_deletions_only(self):
-        existing = {"ospx-smoke-previous"}
-        states = [["ospx-smoke-previous", "policy-deny-current", "personal"],
-                  ["ospx-smoke-previous", "personal"]]
-        replies = [Namespace(stdout=json.dumps({"sandboxes": [{"name": n} for n in names]}))
-                   for names in states]
-        with patch.object(host, "run", side_effect=replies), patch.object(host.time, "sleep") as sleep:
-            self.assertEqual(host.openshell_leftovers(["owner"], existing, attempts=2), [])
-        sleep.assert_called_once_with(2)
-
-    def test_openshell_cleanup_reports_a_stuck_deletion(self):
-        reply = Namespace(stdout=json.dumps({"sandboxes": [{"name": "policy-deny-current"}]}))
-        with patch.object(host, "run", return_value=reply), patch.object(host.time, "sleep"):
-            self.assertEqual(host.openshell_leftovers(["owner"], set(), attempts=2),
-                             ["policy-deny-current"])
-
-    def test_openshell_probe_uses_the_installed_provider(self):
-        self.assertEqual(host.openshell_inference({"mock": True}),
-                         ["OPENSHELL_MODEL_ID=fixture"])
-        self.assertEqual(host.openshell_inference({"mock": False, "ready": True}),
-                         ["OPENSHELL_MODEL_ID=qwen3-8b", "PRAXIS_API_PREFIX=/vllm"])
-        self.assertEqual(host.openshell_inference({"mock": False, "ready": True, "model": "qwen3.8-27b-int4"}),
-                         ["OPENSHELL_MODEL_ID=qwen3.8-27b-int4", "PRAXIS_API_PREFIX=/vllm"])
-        with self.assertRaises(ValueError):
-            host.openshell_inference({"mock": False, "ready": False})
-
     def test_cpu_harness_has_a_longer_bounded_deadline_without_affecting_mocks(self):
         with tempfile.TemporaryDirectory() as directory:
             mode = Path(directory) / "mode"
@@ -165,7 +139,7 @@ class RunnerTest(unittest.TestCase):
     def test_bundle_excludes_workstation_material(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for name in ("configs", "scripts", "tests", "openshell", ".state", ".git"):
+            for name in ("configs", "scripts", "tests", ".state", ".git"):
                 (root / name).mkdir()
                 (root / name / "included.txt").write_text(name)
             for name in ("caller.secret", "credentials.local", "cache.pyc"):
@@ -174,8 +148,8 @@ class RunnerTest(unittest.TestCase):
                 data, manifest = runner.bundle()
             with tarfile.open(fileobj=io.BytesIO(data)) as archive:
                 self.assertEqual(set(archive.getnames()), set(manifest))
-                self.assertEqual(len(manifest), 4)
-                self.assertTrue(all(len(value) == 64 for value in manifest.values()))
+            self.assertEqual(len(manifest), 3)
+            self.assertTrue(all(len(value) == 64 for value in manifest.values()))
 
     def test_bundle_refuses_symlink_to_private_file(self):
         with tempfile.TemporaryDirectory() as directory:

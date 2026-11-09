@@ -2,7 +2,7 @@
 
 Start here. Deploy any of the VMs below; each has its own plan, launch
 and journal. They can run at the same time. AWS deployment prepares the host;
-[smoke tests](rhel-smoke.md) install and test the services afterward.
+the gateway and vLLM test suites install and test the services afterward.
 
 For the PriceTag metering pilot, see the
 [pilot overview](pricetag.md) and its [AWS deployment runbook](aws-pricetag.md).
@@ -59,8 +59,8 @@ local vLLM pilot; keep the memory/context sizing below for inference decisions.
 
 | VM name | Scenario | Inference preset |
 | --- | --- | --- |
-| `all-in-one-gpu` | Local users, optional OpenShell | GPU: `g6.2xlarge`, L4, 32 GiB RAM, 200 GiB disk |
-| `all-in-one-cpu` | Local users, optional OpenShell | CPU: `m7i.4xlarge`, 64 GiB RAM, 100 GiB disk |
+| `all-in-one-gpu` | Local users | GPU: `g6.2xlarge`, L4, 32 GiB RAM, 200 GiB disk |
+| `all-in-one-cpu` | Local users | CPU: `m7i.4xlarge`, 64 GiB RAM, 100 GiB disk |
 | `remote-gateway-gpu` | Remote HTTPS/JWT clients | GPU: `g6.2xlarge`, L4, 32 GiB RAM, 200 GiB disk |
 | `remote-gateway-cpu` | Remote HTTPS/JWT clients | CPU: `m7i.4xlarge`, 64 GiB RAM, 100 GiB disk |
 | `all-in-one-cloud` | Local users, external providers only | No vLLM: `m7i.2xlarge`, 32 GiB RAM, 50 GiB disk |
@@ -147,7 +147,7 @@ the estimate does not assume it. The observed 27B model-loading memory was
 is a bounded-context host, and why 48 GB is a reasonable first full-native-context
 GPU candidate. These calculations are not an end-to-end memory benchmark.
 [Pinned architecture](https://huggingface.co/RedHatAI/Qwen3.8-27B-INT4/blob/91bd022d5b49442a868bc35008f6c21e1860edfa/config.json),
-[measured baseline](compatibility.md#cpugpu-limits-and-measured-performance).
+the recorded deployment baseline.
 
 The current 64 GiB CPU host is not ruled out for a single full-native-context
 request: its measured available RAM could accommodate a larger cache. That
@@ -269,7 +269,7 @@ before retrying. For `InsufficientInstanceCapacity`, use the
 Nothing is cleaned up automatically.
 
 The config chooses hardware; `--scenario` chooses the gateway role. Select
-Qwen3-8B or quantized Qwen3.8-27B later during [vLLM setup](rhel-real.md#1-install-real-qwen);
+Qwen3-8B or quantized Qwen3.8-27B later during vLLM setup;
 AWS deployment itself does not install a model. To change
 hardware or disk size, see [configuration examples](aws-operations.md#direct-cli-and-custom-vm-configurations).
 
@@ -397,8 +397,7 @@ The endpoint command prints the tagged instance's private IPv4 address as
 group with public IPv4/IPv6 ingress on port 8000. Configure the dedicated VM
 with [the vLLM administration guide](../quickstarts/common/vllm.md), using
 `--remote` and the printed private IP. Configure the gateway with
-`--vllm-endpoint "$VLLM_ENDPOINT"`. For the bootc/OpenShell path, run
-`sudo sss-bootc inference remote-vllm "$VLLM_ENDPOINT"` instead.
+`--vllm-endpoint "$VLLM_ENDPOINT"`.
 
 ## Share deployed VM details
 
@@ -530,13 +529,12 @@ For **manual installation on a fresh VM**, follow the official guides in order:
    The account above is already created. Remote clients instead use
    [HTTPS/JWT client setup](../quickstarts/remote-gateway/users.md); unified catalogs
    currently support the all-in-one gateway only.
-4. Test [model selection, switching and quotas](gateway-features.md).
+4. Test model selection, switching, and quotas with the gateway suites.
    The Responses history adapter is an explicit experiment in that guide.
 
 For **automated installation and regression tests**, choose:
 
-- **CPU/GPU vLLM variants:** [mock smoke tests](rhel-smoke.md), then
-  [real Qwen and manual testing](rhel-real.md). OpenShell is optional on all-in-one.
+- **CPU/GPU vLLM variants:** run the gateway and vLLM test suites after installation.
 - **External providers only:** on the fresh VM follow the
   [all-in-one installation](../quickstarts/all-in-one/in-memory.md) or
   [remote-gateway installation](../quickstarts/remote-gateway/install.md).

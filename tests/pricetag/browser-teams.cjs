@@ -14,6 +14,17 @@ let stage='setup';
  const cert=new X509Certificate(fs.readFileSync(path.join(dir,'server.pem')));
  const pin=createHash('sha256').update(cert.publicKey.export({type:'spki',format:'der'})).digest('base64');
  const browser=await chromium.launch({args:['--ignore-certificate-errors-spki-list='+pin]});
+ // Browser chart loads and these extra adversarial probes share the normal
+ // public request limiter. Retry only read-only 429s; never retry mutations or
+ // turn an authorization denial into success.
+ async function read(context,url,options){
+  await new Promise(resolve=>setTimeout(resolve,100));
+  for(let attempt=0;;attempt++){
+   const response=await context.request.get(url,options);
+   if(response.status()!==429||attempt===5)return response;
+   await response.dispose();await new Promise(resolve=>setTimeout(resolve,1000));
+  }
+ }
  async function session(user){
   const file=path.join(dir,user.subject+'.key');assert.equal(fs.statSync(file).mode&0o077,0);
   const context=await browser.newContext();context.setDefaultTimeout(15000);const page=await context.newPage();
@@ -24,20 +35,22 @@ let stage='setup';
  async function verifyPersonalAPI(context,user){
   const other=manifest.users.find(u=>u.subject!==user.subject).subject;
   const headers={'X-Forwarded-User':other,'X-MaaS-Username':other};
-  const routes=['overview','groups','users','models','tools','recent','timeline'];
-  for(const route of routes){
-   await new Promise(resolve=>setTimeout(resolve,150));
+  for(const route of ['summary','models','recent']){
    stage='personal API boundary '+route;
-   const endpoint=base+'/api/v1/dashboard/'+route+'?range=mtd';
-   const own=await context.request.get(endpoint,{headers});assert.equal(own.status(),200,route+' own read');
+   const endpoint=base+'/api/v1/me/usage/'+route+'?range=mtd';
+   const own=await read(context,endpoint,{headers});assert.equal(own.status(),200);
    const data=await own.json();
-   if(route==='overview'){assert.ok(data.total_requests>0);assert.equal(data.active_users,1);}
-   if(route==='users')assert.deepEqual(data.map(r=>r.username),[user.subject]);
-   if(route==='recent')assert.ok(data.length>0 && data.every(r=>r.username===user.subject));
+   if(route==='summary'){assert.ok(data.overview.total_requests>0);assert.equal(data.overview.active_users,1);}
+   if(route==='models')assert.ok(data.length>0);
+   if(route==='recent')assert.ok(data.length>0&&data.every(r=>r.username===user.subject));
+   // Upstream ignores supplied identity filters: compare full scoped responses.
    for(const query of [other,user.subject+','+other]){
-    const denied=await context.request.get(endpoint+'&user='+encodeURIComponent(query),{headers});
-    assert.equal(denied.status(),403,route+' cross-user filter');
+    const filtered=await read(context,endpoint+'&user='+encodeURIComponent(query),{headers});
+    assert.equal(filtered.status(),200);assert.deepEqual(await filtered.json(),data);
    }
+  }
+  for(const route of ['overview','directory-users','geo','cost-centers']){
+   const denied=await read(context,base+'/api/v1/dashboard/'+route,{headers});assert.equal(denied.status(),403);
   }
  }
  try{
@@ -53,27 +66,17 @@ let stage='setup';
    const user=manifest.users[index];stage='session '+(user.manager?'manager':'personal')+' team '+user.team;
    const {context,page}=await session(user);
    stage='render personal Usage charts for '+(user.manager?'manager':'member');
-   await page.goto(base+'/dashboard');
-   await page.waitForFunction(()=>cachedOverview && cachedOverview.total_requests>0 && cachedModels.length>0 && tokenChart && tokenChart.data.datasets[0].data.some(n=>n>0),{},{timeout:15000}).catch(async error=>{console.log('Chart state',await page.evaluate(()=>({requests:cachedOverview?.total_requests,models:cachedModels.length,chart:!!tokenChart,chartLibrary:typeof Chart,failed:document.querySelector('#last-refresh').textContent.includes('could not be loaded')})));throw error;});
-   assert.equal(await page.evaluate(()=>directoryUsers.length),0);
-   const personal=await page.evaluate(async(subject)=>{
-    const own=await(await fetch('/api/v1/dashboard/users?range=mtd')).json();
-    const forbidden=await fetch('/api/v1/dashboard/overview?user='+encodeURIComponent(subject),{headers:{'X-Forwarded-User':subject,'X-MaaS-Username':subject}});
-    return {own,forbidden:forbidden.status};
-   },manifest.users.find(u=>u.subject!==user.subject).subject);
-   assert.deepEqual(personal.own.map(u=>u.username),[user.subject]);
-   assert.equal(personal.forbidden,403);
-   stage='backend personal isolation for '+(user.manager?'manager':'member');
+   await page.goto(base+'/account');
+   await page.waitForFunction(()=>Number(document.querySelector('#kpi-requests').textContent)>0&&document.querySelectorAll('#model-rows tr').length>0);
    await verifyPersonalAPI(context,user);
    stage='personal chart failure and retry';
-   await page.route('**/api/v1/dashboard/models?**',route=>route.fulfill({status:503,body:'synthetic failure'}));
-   await page.evaluate(()=>refresh(true));
-   await page.waitForFunction(()=>document.querySelector('#last-refresh').textContent.includes('could not be loaded'));
-   await page.unroute('**/api/v1/dashboard/models?**');await page.evaluate(()=>refresh(true));
-   await page.waitForFunction(()=>!document.querySelector('#last-refresh').textContent.includes('could not be loaded'));
+   await page.route('**/api/v1/me/usage/models?**',route=>route.fulfill({status:503,body:'synthetic failure'}));
+   await page.reload();await page.getByText('Could not load model usage.',{exact:true}).waitFor();
+   await page.unroute('**/api/v1/me/usage/models?**');await page.reload();
+   await page.waitForFunction(()=>document.querySelector('#model-rows').textContent.includes('fixture'));
    stage='team scope for '+(user.manager?'manager':'member');
 
-   await page.goto(base+(user.manager?'/manager':'/dashboard'));
+   await page.goto(base+(user.manager?'/manager':'/account'));
    const allowed=manifest.users.filter(u=>user.manager?u.team===user.team:u.subject===user.subject).map(u=>u.user_id);
    const outside=manifest.users.find(u=>u.team!==user.team);
    const result=await page.evaluate(async({allowed,outside})=>{
@@ -117,18 +120,27 @@ let stage='setup';
   await Promise.all([admin.waitForURL(u=>u.pathname!=='/login'),admin.getByRole('button',{name:'Sign In',exact:true}).click()]);
   for(const target of [manifest.users[0],manifest.users[1]]){
    stage='start impersonation '+(target.manager?'manager':'member');
-   await admin.goto(base+'/admin/impersonate?as='+encodeURIComponent(target.subject));
-   await Promise.all([admin.waitForURL(u=>u.pathname==='/dashboard'),admin.getByRole('button',{name:'Continue',exact:true}).click()]);
+   // Allow the prior chart burst to settle before a one-shot session mutation.
+   // A rejected POST must fail; do not automatically replay it.
+   await new Promise(resolve=>setTimeout(resolve,1000));
+   assert.equal((await admin.goto(base+'/admin/impersonate?as='+encodeURIComponent(target.subject))).status(),200);
+   await new Promise(resolve=>setTimeout(resolve,1000));
+   const changed=admin.waitForResponse(r=>new URL(r.url()).pathname==='/admin/impersonate'&&r.request().method()==='POST');
+   await admin.getByRole('button',{name:'Continue',exact:true}).click();assert.equal((await changed).status(),302);
+   await admin.waitForURL(u=>u.pathname==='/account');
    stage='impersonated charts '+(target.manager?'manager':'member');
-   await admin.waitForFunction(()=>cachedOverview && cachedOverview.total_requests>0 && cachedModels.length>0 && tokenChart && tokenChart.data.datasets[0].data.some(n=>n>0));
+   await admin.waitForFunction(()=>Number(document.querySelector('#kpi-requests').textContent)>0&&document.querySelectorAll('#model-rows tr').length>0);
    await verifyPersonalAPI(adminContext,target);
-   const scoped=await admin.evaluate(async()=>({users:await(await fetch('/api/v1/dashboard/users?range=mtd')).json(),directory:(await fetch('/api/v1/dashboard/directory-users')).status}));
-   assert.deepEqual(scoped.users.map(u=>u.username),[target.subject]);assert.equal(scoped.directory,403);
    stage='return from impersonation';
+   await new Promise(resolve=>setTimeout(resolve,1000));
    await admin.goto(base+'/admin/impersonate');
    await Promise.all([admin.waitForURL(u=>u.pathname==='/dashboard'),admin.getByRole('button',{name:'Continue',exact:true}).click()]);
   }
   stage='restored administrator charts';
+  for(const route of ['overview','geo','cost-centers']){
+   const response=await read(adminContext,base+'/api/v1/dashboard/'+route);
+   assert.equal(response.status(),200);
+  }
   await admin.waitForFunction(()=>isAdmin && directoryUsers.length>0 && cachedOverview.total_requests>0);
   console.log('PASS: impersonated manager/member Usage remains personal; administrator directory and aggregate charts restored');
  }finally{await browser.close();}

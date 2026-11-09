@@ -1,15 +1,17 @@
 # Mock gateway demo checks
 
+For a new PriceTag source revision, use the [upgrade qualification sequence](pricetag-upgrade.md)
+before changing the released image pins.
+
 The [demo deployment workflow](../../.github/workflows/pricetag-demo.yml) runs on
 a disposable GitHub-hosted Linux runner. It builds the pinned MaaS and PriceTag
 demo sources, starts PostgreSQL and Praxis, and runs the API/browser/quota suite
 against synthetic inference. No provider keys, SSH credentials or publishing
 secrets are required.
 
-The [management demo #91](https://github.com/redhat-et/secure-single-server/pull/91)
-and [image publication #92](https://github.com/redhat-et/secure-single-server/pull/92)
-are merged. Source builds use the same reviewed revisions as publication;
-replacing them with qualified registry digests is a later optimization.
+CI builds the explicitly pinned application source revisions. Keep those pins
+aligned with the candidate under test; a passing run against an older pin does
+not qualify a source upgrade.
 
 The build also runs PriceTag’s Go tests against a disposable PostgreSQL instance
 with the full migration chain, plus all PriceTag UI JavaScript unit tests.
@@ -52,6 +54,10 @@ sudo python3 tests/pricetag/demo-suite \
 If the host cannot reach its own configured public IPv4, append
 `--loopback-public-ip`. This temporarily adds a local route for that address and
 removes it afterward; it does not change the AWS security group or skip TLS.
+Use `--keep-going` to collect independent failures in one run; the suite still
+exits nonzero if any check fails. To rerun one scenario during diagnosis, add
+`--only browser-teams` (see `--help` for all names). Omit `--only` for the final
+release run.
 
 ## Run the disposable container deployment
 

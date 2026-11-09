@@ -96,7 +96,7 @@ CONTAINER_ENGINE=podman python3 tests/remote-gateway/image.py --valkey
 Issue separate JWTs for two test users. Follow [remote user setup](../quickstarts/remote-gateway/users.md),
 using the test CA's public `ca.pem` and the HTTPS URL. Run the three harnesses
 with memory, then uninstall that profile and repeat with Valkey. Use the
-[harness acceptance checklist](harnesses.md), including quota exhaustion,
+the [testing checklist](README.md), including quota exhaustion,
 accounting, Valkey outages and restart recovery.
 
 Both JWT callers currently share provider/API quotas. Token renewal must not

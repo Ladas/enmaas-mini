@@ -9,7 +9,6 @@ readonly REPO_DIR
 # shellcheck source=scripts/common/lib.sh
 source "${SCRIPT_DIR}/lib.sh"
 
-openshell_owner=""
 profile="memory"
 praxis_image="${DEFAULT_PRAXIS_IMAGE}"
 valkey_image=""
@@ -48,8 +47,7 @@ Usage:
     --valkey-url-secret NAME --valkey-acl-secret NAME [OPTIONS]
 
 Options:
-  --scenario all-in-one|remote-gateway|openshell-praxis  Set by the scenario install wrapper.
-  --owner ACCOUNT                     OpenShell add-on: dedicated locked account.
+  --scenario all-in-one|remote-gateway  Set by the scenario install wrapper.
   --tls-cert PATH --tls-key PATH        Remote: PEM full chain and matching key.
   --jwt-public-key PATH                 Remote: RSA public verification key only.
   --development-fedora                  Allow mutable Fedora for development.
@@ -67,12 +65,12 @@ EOF
 while (( "$#" )); do
   # Reject a trailing value-taking option with a clear message before shifting.
   case "$1" in
-    --owner|--scenario|--tls-cert|--tls-key|--jwt-public-key|--profile|--praxis-image|--valkey-image|--openai-secret|--anthropic-secret|--judge-secret|--valkey-url-secret|--valkey-acl-secret|--judge-model|--weak-model|--strong-model)
+    --scenario|--tls-cert|--tls-key|--jwt-public-key|--profile|--praxis-image|--valkey-image|--openai-secret|--anthropic-secret|--judge-secret|--valkey-url-secret|--valkey-acl-secret|--judge-model|--weak-model|--strong-model)
       [[ "$#" -ge 2 && -n "$2" ]] ||
         { usage >&2; die "missing value for $1"; }
       if [[ "$2" == --* ]]; then
         case "$2" in
-          --owner|--scenario|--tls-cert|--tls-key|--jwt-public-key|--profile|--praxis-image|--valkey-image|--openai-secret|--anthropic-secret|--judge-secret|--valkey-url-secret|--valkey-acl-secret|--judge-model|--weak-model|--strong-model|--development-fedora|--providers|--vllm|--vllm-endpoint|--prepare|--replace)
+          --scenario|--tls-cert|--tls-key|--jwt-public-key|--profile|--praxis-image|--valkey-image|--openai-secret|--anthropic-secret|--judge-secret|--valkey-url-secret|--valkey-acl-secret|--judge-model|--weak-model|--strong-model|--development-fedora|--providers|--vllm|--vllm-endpoint|--prepare|--replace)
             { usage >&2; die "missing value for $1"; }
             ;;
         esac
@@ -80,7 +78,6 @@ while (( "$#" )); do
       ;;
   esac
   case "$1" in
-    --owner) openshell_owner="${2:-}"; shift 2 ;;
     --scenario) scenario="${2:-}"; shift 2 ;;
     --tls-cert) tls_cert="${2:-}"; shift 2 ;;
     --tls-key) tls_key="${2:-}"; shift 2 ;;
@@ -212,33 +209,9 @@ ensure_service_account() {
 }
 
 case "${scenario}" in
-  all-in-one|remote-gateway|openshell-praxis) ;;
-  *) die "scenario must be all-in-one, remote-gateway, or openshell-praxis" ;;
+  all-in-one|remote-gateway) ;;
+  *) die "scenario must be all-in-one or remote-gateway" ;;
 esac
-
-if [[ "${scenario}" == openshell-praxis ]]; then
-  [[ -n "${openshell_owner}" ]] || die "OpenShell requires --owner ACCOUNT"
-  note "installing openshell-praxis scenario (OpenShell gateway + Praxis all-in-one loopback)"
-
-  # Assert Praxis all-in-one is installed
-  [[ -f "${SCENARIO_FILE}" ]] || die "Praxis all-in-one must be installed first (no SCENARIO_FILE found)"
-  installed_scenario="$(<"${SCENARIO_FILE}")"
-  [[ "${installed_scenario}" == "all-in-one" ]] || die "Praxis scenario must be all-in-one; found: ${installed_scenario}"
-  [[ -f "${PROFILE_FILE}" ]] || die "Praxis profile not found; ensure all-in-one gateway is fully installed"
-
-  # Check Praxis health
-  health="$(as_service podman inspect praxis-shared-gateway \
-    --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null || true)"
-  [[ "${health}" == "healthy" ]] || die "Praxis all-in-one gateway is not healthy; current state: ${health}"
-  note "Praxis all-in-one gateway is healthy"
-
-  # OpenShell is an independent add-on; never rewrite the hashed Praxis scenario.
-  verify_managed_manifest
-  "${REPO_DIR}/openshell/scripts/install.sh" --owner "${openshell_owner}"
-  verify_managed_manifest
-  note "OpenShell add-on installed; Praxis remains managed as all-in-one"
-  exit 0
-fi
 
 if [[ "${scenario}" == remote-gateway && "${prepare_only}" == 0 ]]; then
   [[ "${profile}" != switchyard ]] || die "remote Switchyard is not qualified; use memory or valkey"

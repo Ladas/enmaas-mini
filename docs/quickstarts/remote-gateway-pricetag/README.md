@@ -20,7 +20,7 @@ The tested VM has 8 vCPUs, 32 GiB RAM and 150 GiB disk. No GPU is needed.
 
 ## 1. Set the connection
 
-Run from your checked-out `secure-single-server` repository on your workstation:
+Run from your checked-out `enmaas-mini` repository on your workstation:
 
 ```console
 RHEL_HOST=ec2-user@YOUR_SERVER_IP
@@ -66,9 +66,10 @@ ssh -t "${SSH_OPTS[@]}" "$RHEL_HOST" \
 ```
 
 Choose providers, enter their keys at hidden prompts, then confirm with `install`.
-Keep **Use tested published images** to install the **My keys** tabs, updated
-administration tables and impersonation confirmation dialog. Choose
-**Build latest demo branches** only to test newer source; see [image options](images.md).
+For the upstream account/UI candidate described below, choose **Build latest demo
+branches**. **Use tested published images** still installs the previous release,
+whose personal-key page is **My keys** (`/management`). The candidate uses
+**My usage → API keys** (`/account?tab=keys`); see [image options](images.md).
 
 - **Providers:** OpenAI, an external OpenAI-compatible/Messages service, or both.
 - **Users:** admin is required; Alice/Bob are optional. Choose **Admin only** to
@@ -116,7 +117,8 @@ ssh "${SSH_OPTS[@]}" "$RHEL_HOST" \
 Open the URL, accept the deployment certificate and paste the admin key.
 Clear the clipboard after login with `pbcopy < /dev/null`. Clipboard managers may retain copied keys.
 Open **Administration** at `/admin`: **Users** handles onboarding and managers;
-**Safety Net** sets defaults; **User quota** sets individual overrides. **My keys** at `/management` handles personal keys.
+**Safety Net** sets defaults; **User quota** sets individual overrides.
+In the source candidate, **My usage → API keys** handles personal keys.
 Follow the [UI demo walkthrough](demo.md) for the
 onboarding, personal/team views, read-only impersonation, budgets, pricing and
 key replacement/offboarding.
@@ -219,7 +221,7 @@ python3 "$REPO/scripts/pricetag/harness" opencode --url "$GATEWAY_URL" \
 ## Operations
 
 Use Administration for users, team
-relationships, budgets, onboarding keys and prices; use My keys for personal keys. Provider/model configuration stays in the host CLI
+relationships, budgets, onboarding keys and prices; use **My usage → API keys** for personal keys. Provider/model configuration stays in the host CLI
 for the reduced demo image. Personal
 and manager dashboards show scoped usage. For automation, use
 [`scripts/pricetag/api`](management-api.md#remote-https-client) from your workstation

@@ -51,7 +51,7 @@ class UserTest(unittest.TestCase):
 
     def test_invalid_names_never_reach_os_commands(self):
         with patch.object(users, "run") as execute:
-            for name in ("root", "praxis-svc", "praxis-smoke", "openshell-svc", "--root", "../test", "has space"):
+            for name in ("root", "praxis-svc", "praxis-smoke", "--root", "../test", "has space"):
                 with self.subTest(name=name), self.assertRaises(ValueError):
                     users.create(name, self.public)
             execute.assert_not_called()

@@ -64,4 +64,4 @@ Keep the generated rewrite rules when using this image.
 [Mock deployment checks](../testing/pricetag-demo-ci.md) cover protocol routing,
 credential separation, alias spoofing, accounting and authorization. Wider
 provider management remains follow-up work in
-[Secure Single Server #58](https://github.com/redhat-et/secure-single-server/issues/58).
+[enMAAS Mini #3](https://github.com/redhat-et/enmaas-mini/issues/3).

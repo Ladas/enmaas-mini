@@ -1,7 +1,7 @@
 # Application images
 
-The installer defaults to qualified, digest-pinned management demo images.
-Use source mode to test a different branch or commit before publication.
+The installer defaults to the previous qualified, digest-pinned release.
+Use source mode for the latest-upstream account/UI candidate before publication.
 Praxis and PostgreSQL remain pinned published images in either mode.
 
 | Mode | MaaS and PriceTag |
@@ -10,6 +10,9 @@ Praxis and PostgreSQL remain pinned published images in either mode.
 | `--image-mode source` | Build from a branch or commit on RHEL to test a new version. |
 
 The installer checks image source labels and CPU architecture.
+
+Application images retain their existing `secure-single-server-*` registry
+names; moving the source repository does not change installed image digests.
 
 ## Open the installation session
 
@@ -60,12 +63,16 @@ options](providers.md). Never put provider keys in command-line arguments.
 Source mode defaults to these fork branches:
 
 - [MaaS: feat/standalone-runtime-minimal](https://github.com/Ladas/models-as-a-service/tree/feat/standalone-runtime-minimal).
-- [PriceTag: feat/standalone-demo-reuse-upstream-ui](https://github.com/Ladas/pricetag-metering/tree/feat/standalone-demo-reuse-upstream-ui).
+- [PriceTag: feat/latest-upstream-standalone](https://github.com/Ladas/pricetag-metering/tree/feat/latest-upstream-standalone).
 
-The published image already includes the **My keys** tabs, administration-table
-changes and impersonation confirmation dialog. Use source mode for changes
-beyond that release. The optional PriceTag follow-up is not selected. Each branch is resolved to a
-full commit before building, recorded in the image label and checked on import.
+The candidate reuses upstream **My usage** and **API keys** at `/account`, with
+the standalone administration and authorization changes. The previous published
+image has **My keys** at `/management`. Each branch resolves to a full commit
+before building, recorded in the image label and checked on import.
+
+For the exact reviewed candidate, use
+`--metering-revision b1c5ce0e82b4bd63525a7eccd9ecd4d010e153d5`
+with source mode. Branch mode may include later commits.
 
 ```console
 cd ~/secure-single-server

@@ -5,7 +5,7 @@ box without installing a system service. It runs under the current user and is
 not the shared-server deployment.
 
 Configuration:
-[`shared-gateway.yaml`](https://github.com/redhat-et/secure-single-server/blob/main/configs/all-in-one/shared-gateway.yaml).
+[`shared-gateway.yaml`](https://github.com/redhat-et/enmaas-mini/blob/main/configs/all-in-one/shared-gateway.yaml).
 
 Podman detaches the container from the terminal, so it normally continues
 after an SSH disconnect. This is not a persistence guarantee: it does not
@@ -17,7 +17,7 @@ a protected service account.
 
 ```console
 sudo dnf install -y podman
-cd secure-single-server
+cd enmaas-mini
 ```
 
 ## 2. Select credentials

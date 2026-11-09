@@ -39,7 +39,7 @@ class LinkHookTests(unittest.TestCase):
     def test_rewrites_inline_source_links(self):
         result = render("[stage](../../scripts/docs/stage.py)")
         self.assertIn(
-            "https://github.com/redhat-et/secure-single-server/blob/main/"
+            "https://github.com/redhat-et/enmaas-mini/blob/main/"
             "scripts/docs/stage.py",
             result,
         )
@@ -50,7 +50,7 @@ class LinkHookTests(unittest.TestCase):
         )
         self.assertIn("[stage][stage]", result)
         self.assertIn(
-            "[stage]: <https://github.com/redhat-et/secure-single-server/"
+            "[stage]: <https://github.com/redhat-et/enmaas-mini/"
             "blob/main/scripts/docs/stage.py>",
             result,
         )
@@ -58,7 +58,7 @@ class LinkHookTests(unittest.TestCase):
     def test_rewrites_angle_bracket_inline_links_with_titles(self):
         result = render("[stage](<../../scripts/docs/stage.py> 'Stage sources')")
         self.assertIn(
-            "https://github.com/redhat-et/secure-single-server/blob/main/"
+            "https://github.com/redhat-et/enmaas-mini/blob/main/"
             "scripts/docs/stage.py",
             result,
         )
@@ -77,7 +77,7 @@ class LinkHookTests(unittest.TestCase):
                     "[guide](../topic_(v2).md)", page, config, []
                 )
                 self.assertIn(
-                    "https://github.com/redhat-et/secure-single-server/blob/main/"
+                    "https://github.com/redhat-et/enmaas-mini/blob/main/"
                     "topic_%28v2%29.md",
                     result,
                 )
@@ -86,7 +86,7 @@ class LinkHookTests(unittest.TestCase):
                     "[hash](../hash%23file.md)", page, config, []
                 )
                 self.assertIn(
-                    "https://github.com/redhat-et/secure-single-server/blob/main/"
+                    "https://github.com/redhat-et/enmaas-mini/blob/main/"
                     "hash%23file.md",
                     result,
                 )
@@ -95,7 +95,7 @@ class LinkHookTests(unittest.TestCase):
                     "[literal hash](<../hash#file.md>)", page, config, []
                 )
                 self.assertIn(
-                    "https://github.com/redhat-et/secure-single-server/blob/main/"
+                    "https://github.com/redhat-et/enmaas-mini/blob/main/"
                     "hash%23file.md",
                     result,
                 )
@@ -103,7 +103,7 @@ class LinkHookTests(unittest.TestCase):
     def test_preserves_query_strings_when_rewriting_source_links(self):
         result = render("[stage](../../scripts/docs/stage.py?raw=1#top)")
         self.assertIn(
-            "https://github.com/redhat-et/secure-single-server/blob/main/"
+            "https://github.com/redhat-et/enmaas-mini/blob/main/"
             "scripts/docs/stage.py?raw=1#top",
             result,
         )
@@ -111,7 +111,7 @@ class LinkHookTests(unittest.TestCase):
     def test_preserves_query_strings_in_angle_bracket_source_links(self):
         result = render("[stage](<../../scripts/docs/stage.py?raw=1#top>)")
         self.assertIn(
-            "https://github.com/redhat-et/secure-single-server/blob/main/"
+            "https://github.com/redhat-et/enmaas-mini/blob/main/"
             "scripts/docs/stage.py?raw=1#top",
             result,
         )
@@ -132,28 +132,18 @@ class LinkHookTests(unittest.TestCase):
         self.assertIn("[missing](../missing.sh)", result)
         self.assertIn("[missing]: ../missing.sh", result)
         self.assertIn(
-            "https://github.com/redhat-et/secure-single-server/blob/main/"
+            "https://github.com/redhat-et/enmaas-mini/blob/main/"
             "scripts/docs/stage.py",
             result,
         )
 
     def test_rewrites_nested_component_links(self):
-        openshell = render_for(
-            "openshell/docs/policy-walkthrough.md",
-            "[smoke](../../tests/openshell-praxis/smoke.sh)",
-        )
-        self.assertIn(
-            "https://github.com/redhat-et/secure-single-server/blob/main/"
-            "tests/openshell-praxis/smoke.sh",
-            openshell,
-        )
-
         bootc = render_for(
-            "bootc/VALIDATION.md",
+            "bootc/README.md",
             "[pins](../scripts/common/lib.sh)",
         )
         self.assertIn(
-            "https://github.com/redhat-et/secure-single-server/blob/main/"
+            "https://github.com/redhat-et/enmaas-mini/blob/main/"
             "scripts/common/lib.sh",
             bootc,
         )
@@ -165,7 +155,7 @@ class LinkHookTests(unittest.TestCase):
             '    "Stage sources"\n'
         )
         self.assertIn(
-            "[stage]: https://github.com/redhat-et/secure-single-server/"
+            "[stage]: https://github.com/redhat-et/enmaas-mini/"
             "blob/main/scripts/docs/stage.py",
             result,
         )

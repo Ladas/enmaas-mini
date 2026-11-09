@@ -74,7 +74,7 @@ def bundle():
     output = io.BytesIO()
     manifest = {}
     with tarfile.open(fileobj=output, mode="w:gz", format=tarfile.USTAR_FORMAT) as archive:
-        for directory in ("configs", "scripts", "tests", "openshell"):
+        for directory in ("configs", "scripts", "tests"):
             for path in sorted((ROOT / directory).rglob("*")):
                 if "__pycache__" in path.parts or path.suffix in (".pyc", ".secret", ".local"):
                     continue
@@ -96,7 +96,7 @@ def main():
     parser.add_argument("--ssh-key", required=True, type=Path)
     parser.add_argument("--scenario", required=True, choices=("all-in-one", "remote-gateway"))
     parser.add_argument("--profile", choices=("memory", "valkey"), default="memory")
-    parser.add_argument("--phase", choices=("install", "mock", "test", "check", "lifecycle", "real-lifecycle", "openshell", "switch-profile", "providers", "gpu-drivers", "real-setup", "real-test", "mock-again", "features", "features-restore", "all"), default="all")
+    parser.add_argument("--phase", choices=("install", "mock", "test", "check", "lifecycle", "real-lifecycle", "switch-profile", "providers", "gpu-drivers", "real-setup", "real-test", "mock-again", "features", "features-restore", "all"), default="all")
     parser.add_argument("--feature-provider", choices=("vllm", "cloud"), default="vllm", help="features: which synthetic provider routes to qualify")
     parser.add_argument("--inference", choices=("cpu", "gpu"))
     parser.add_argument("--vllm-image", help="real-setup: candidate NAME@sha256:DIGEST for the selected CPU/GPU mode")
@@ -117,8 +117,6 @@ def main():
             parser.error("--vllm-image requires an immutable NAME@sha256:DIGEST")
     if args.harness and args.phase not in ("real-test", "real-lifecycle", "features"):
         parser.error("--harness applies only to real-test, real-lifecycle or features")
-    if args.phase == "openshell" and args.scenario != "all-in-one":
-        parser.error("reuse the all-in-one VM for OpenShell")
     if not re.fullmatch(r"[a-z_][a-z0-9_-]*@[A-Za-z0-9][A-Za-z0-9.-]*", args.host):
         parser.error("use an explicit user@host")
     if not args.ssh_key.is_file():

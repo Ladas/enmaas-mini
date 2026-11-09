@@ -16,6 +16,9 @@ import urllib.parse
 import uuid
 
 ROOT=Path(__file__).resolve().parents[2]
+BROWSERS=['management','user-relationships','key-lifecycle','offboarding','pricing','discounts','session-boundary']
+CHECKS=['key-demotion','public-boundary','native-routing','documented-cli-api','pricing-api',
+        *['browser-'+name for name in BROWSERS],'browser-teams','quota-matrix']
 
 
 def main():
@@ -23,6 +26,8 @@ def main():
     parser.add_argument('--output',required=True,type=Path)
     parser.add_argument('--node-modules',required=True,type=Path,help='directory containing the pinned Playwright installation')
     parser.add_argument('--loopback-public-ip',action='store_true',help='temporarily route the configured public IPv4 to this mock host for self-tests; requires iproute')
+    parser.add_argument('--keep-going',action='store_true',help='collect independent acceptance failures; still exit nonzero if any check fails')
+    parser.add_argument('--only',nargs='+',choices=CHECKS,help='run selected checks while iterating; omit for release qualification')
     args=parser.parse_args()
     if os.geteuid()!=0: parser.error('run with sudo on mock RHEL')
     loader=importlib.machinery.SourceFileLoader('benchmark',str(ROOT/'scripts/pricetag/benchmark'))
@@ -32,13 +37,15 @@ def main():
     origin=next(x.split('=',1)[1] for x in Path('/etc/praxis-pricetag/metering.env').read_text().splitlines() if x.startswith('MANAGEMENT_PUBLIC_ORIGIN='))
     route_added=False;results=[]
     def run(name,command,env=None):
+        if args.only and name not in args.only and name not in ('browser-runtime','fixture','fixture-cleanup'):
+            return
         started=time.monotonic()
         with (args.output/(name+'.log')).open('w') as log:
             completed=subprocess.run(command,env=env,stdout=log,stderr=subprocess.STDOUT,cwd='/tmp',timeout=600)
         results.append({'test':name,'passed':completed.returncode==0,'seconds':time.monotonic()-started})
         (args.output/'results.json').write_text(json.dumps(results,indent=2)+'\n')
         print(('PASS ' if completed.returncode==0 else 'FAIL ')+name,flush=True)
-        if completed.returncode: raise RuntimeError(name+' failed; inspect private log')
+        if completed.returncode and not args.keep_going: raise RuntimeError(name+' failed; inspect private log')
     fixture=args.output/'fixture'
     fixture_prefix='demo-suite-'+uuid.uuid4().hex[:8]
     try:
@@ -57,11 +64,12 @@ def main():
             run('native-routing',[sys.executable,str(ROOT/'tests/pricetag/rhel-routing.py')])
             run('documented-cli-api',[sys.executable,str(ROOT/'tests/pricetag/remote-demo.py')],env)
             run('pricing-api',[sys.executable,str(ROOT/'tests/pricetag/rhel-pricing.py'),'--output',str(args.output/'pricing-api')])
-            for scenario in ['management','user-relationships','key-lifecycle','offboarding','pricing','discounts','session-boundary']:
+            for scenario in BROWSERS:
                 run('browser-'+scenario,['node',str(ROOT/f'tests/pricetag/browser-{scenario}.cjs')],env)
-            run('fixture',[sys.executable,str(ROOT/'tests/pricetag/rhel-demo-fixture.py'),'--prefix',fixture_prefix,'--output',str(fixture)])
-            shutil.copyfile(directory/'server.pem',fixture/'server.pem')
-            run('browser-teams',['node',str(ROOT/'tests/pricetag/browser-teams.cjs')],{**env,'KEY_DIRECTORY':str(fixture),'ADMIN_KEY_DIRECTORY':private})
+            if not args.only or 'browser-teams' in args.only:
+                run('fixture',[sys.executable,str(ROOT/'tests/pricetag/rhel-demo-fixture.py'),'--prefix',fixture_prefix,'--output',str(fixture)])
+                shutil.copyfile(directory/'server.pem',fixture/'server.pem')
+                run('browser-teams',['node',str(ROOT/'tests/pricetag/browser-teams.cjs')],{**env,'KEY_DIRECTORY':str(fixture),'ADMIN_KEY_DIRECTORY':private})
             run('quota-matrix',[sys.executable,str(ROOT/'tests/pricetag/rhel-quota-matrix.py'),'--output',str(args.output/'quota')])
     finally:
         try:
@@ -69,6 +77,8 @@ def main():
                 run('fixture-cleanup',[sys.executable,str(ROOT/'tests/pricetag/rhel-demo-fixture.py'),'--prefix',fixture_prefix,'--output',str(fixture),'--cleanup'])
         finally:
             if route_added: subprocess.run(['ip','route','del','local',address+'/32','dev','lo'],check=True)
+    if any(not result['passed'] for result in results):
+        raise SystemExit('Acceptance failed; inspect private logs and results.json')
 
 
 if __name__=='__main__':main()

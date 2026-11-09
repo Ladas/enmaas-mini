@@ -1,17 +1,15 @@
 # Deployment methods
 
-There are two ways to deploy OpenShell for the scenarios in this guide:
+Choose the smallest deployment that meets your access-control and budgeting
+requirements.
 
-Use a dedicated RHEL 9.8+ x86_64 host for either method. The full
-scenario run was validated on RHEL 9.8 with Podman 5.8.2. See the
-[v0.1.5 validation record](testing/upgrade-0.1.5.md).
+| Goal | Guide |
+| --- | --- |
+| Run one shared Praxis gateway on a host | [All-in-one gateway](quickstarts/all-in-one/README.md) |
+| Serve remote clients over HTTPS with JWTs | [Remote gateway](quickstarts/remote-gateway/README.md) |
+| Add user keys, budgets, and USD metering | [Remote gateway with PriceTag](quickstarts/remote-gateway-pricetag/README.md) |
+| Use local OpenAI-compatible inference | [vLLM guide](quickstarts/common/vllm.md) |
+| Deploy a repeatable RHEL OS image | [Bootc guide](../bootc/README.md) |
 
-- **Bootc deployment:** install the reviewed stack as a repeatable RHEL image.
-  Follow the [bootc deployment guide](quickstarts/openshell-single-server/bootc.md).
-- **Manual Podman deployment:** install OpenShell and the harnesses on a
-  dedicated RHEL host with Podman. Follow the
-  [manual deployment guide](quickstarts/openshell-single-server/manual.md).
-
-Both deployment methods support the workflows in the
-[scenario catalog](examples/README.md). Choose the guide that fits your host
-and follow its setup steps before running a scenario.
+All methods keep provider credentials in the gateway deployment. Clients
+receive only their own gateway credentials or short-lived keys.
