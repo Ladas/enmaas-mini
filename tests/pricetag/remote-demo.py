@@ -57,10 +57,10 @@ def main():
             assert who['quota']['limit_usd'] == 7.25
             assert command(*api('GET', '/api/v1/management/users', key, 'denied.json')).returncode != 0
             checked(*api('GET', '/api/v1/management/users', '/root/pricetag-admin/admin.key', 'users.json'))
-            checked(*api('GET', '/me/keys', key, 'keys.json'))
+            checked(*api('GET', '/api/v1/me/keys', key, 'keys.json'))
             keys = json.loads((directory / 'keys.json').read_text())['data']
             assert len(keys) == 1
-            checked(*api('DELETE', '/me/keys/' + keys[0]['id'], key, 'revoked.json'))
+            checked(*api('DELETE', '/api/v1/me/keys/' + keys[0]['id'], key, 'revoked.json'))
             print('PASS: user CLI onboarding, manage budget write, HTTPS api scope/role denial and own-key revocation')
     finally:
         request('PUT', 'users', {'subject': subject, 'active': False})

@@ -3,6 +3,7 @@
 // or screenshots while a one-time key is visible.
 'use strict';
 const downloadKey=require('./key-download.cjs');
+const account=require('./account-ui.cjs');
 require('./mock-guard.cjs')();
 const { chromium } = require('playwright');
 const fs = require('node:fs');
@@ -35,9 +36,7 @@ async function done(page, action) {
     await page.goto(base + '/login');
     await page.locator('#api_key').fill(key);
     await Promise.all([page.waitForURL(url => url.pathname !== '/login'), page.getByRole('button', { name: 'Sign In', exact: true }).click()]);
-    await page.goto(base + '/management');
-    await page.locator('#keyManagement').waitFor({state:'visible'});
-    await page.locator('#keys[aria-busy=false]').waitFor();
+    await account.open(page,base);
     return { page, context };
   }
   try {
@@ -89,7 +88,7 @@ async function done(page, action) {
     await admin.locator('#onboardKey').getByRole('button', { name: 'Dismiss key', exact: true }).click();
     assert.equal(await admin.locator('#onboardKey').isVisible(), false);
     const { page: user, context: userContext } = await login(issued.key);user.on('dialog', dialog=>dialog.accept());
-    assert.equal(await user.getByRole('link', {name:'My team',exact:true}).count(),0);
+    assert.equal(await user.getByRole('link', {name:'My team',exact:true}).isVisible(),false);
     assert.equal(await user.locator('#admin').isVisible(), false);
     const statuses = await user.evaluate(async () => {
       const result = [];
@@ -99,20 +98,14 @@ async function done(page, action) {
       return result;
     });
     assert.deepEqual(statuses, [403, 403, 403, 403]);
-    await done(user, () => user.getByRole('button', { name: 'Refresh', exact: true }).click());
-    assert.ok(await user.locator('#keys button').count(), 'issued key absent from personal list');
-    await user.getByRole('tab', {name:'Create key',exact:true}).click();
-    await user.locator('#key [name=name]').fill('demo-personal-key');
-    await user.locator('#key [name=expiresIn]').fill('1d');
-    await done(user, () => user.getByRole('button', { name: 'Create key', exact: true }).click());
-    const personal = await downloadKey(user, '#newKey');
-    await user.getByRole('tab', {name:'My keys',exact:true}).click();
-    assert.ok(personal.key, 'personal key missing');
-    await done(user, () => user.getByRole('button', { name: 'Refresh', exact: true }).click());
-    const row = user.locator('#keys tr[data-key-id="' + personal.id + '"]');
-    await done(user, () => row.getByRole('button', { name: 'Revoke', exact: true }).click());
-    await user.locator('#keyState').selectOption('revoked');
-    assert.equal(await row.locator('.key-status').textContent(), 'revoked');
+    await account.refresh(user);
+    assert.ok(await user.locator('#key-rows button').count(), 'issued key absent from personal list');
+    const personal=await account.create(user,'demo-personal-key','1d');
+    assert.ok(personal.key,'personal key missing');
+    await account.refresh(user);await account.revoke(user,personal.id);
+    await user.locator('#key-state').selectOption('revoked');
+    const row=user.locator('#key-rows tr[data-key-id="'+personal.id+'"]');
+    await row.waitFor();assert.equal(await row.locator('.pill').textContent(),'revoked');
     await userContext.close();
     await adminContext.close();
     console.log('PASS: UI user onboarding, budget save, finite-key issuance/login, role isolation, own-key creation and revocation');

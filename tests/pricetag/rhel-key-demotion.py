@@ -65,7 +65,7 @@ def main():
         assert public('GET', '/api/v1/management/users') == 403
         assert public('DELETE', '/me/keys/' + keys[1]['id']) in (403, 404), 'demoted session revoked foreign key'
         assert maas(subjects[1], 'GET', '/' + keys[1]['id'])['status'] == 'active'
-        assert public('DELETE', '/me/keys/' + keys[0]['id']) == 200
+        assert public('DELETE', '/api/v1/me/keys/' + keys[0]['id']) == 204
         print('PASS: demoted session denied admin API and foreign revocation; own revocation succeeds')
     finally:
         for subject, key in zip(subjects, keys):

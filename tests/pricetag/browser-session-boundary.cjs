@@ -20,11 +20,11 @@ let stage='setup';
   // Confirmation pages intentionally forbid fetch through their CSP. Inspect
   // the same browser session via its cookie-sharing request context instead.
   async function who(){const response=await page.context().request.get(base+'/api/v1/whoami');assert.equal(response.status(),200);return await response.json();}
-  async function confirmDashboard(){
+  async function confirmDashboard(expected='/dashboard'){
    // Returning to admin reloads /dashboard at the SAME URL. waitForURL alone
    // can resolve before the form has submitted or the session cookie changes.
    await Promise.all([page.waitForEvent('domcontentloaded'),page.getByRole('button',{name:'Continue',exact:true}).click()]);
-   assert.equal(new URL(page.url()).pathname,'/dashboard');
+   assert.equal(new URL(page.url()).pathname,expected);
   }
   const original=await who();assert.equal(original.user,'admin');
   stage='view-as modal does not change identity';await page.locator('#vtab-user-keys').click();await page.locator('#onboard [name=subject]').selectOption('alice');
@@ -34,11 +34,11 @@ let stage='setup';
   await viewLink.click();await page.keyboard.press('Escape');assert.equal((await who()).user,'admin');await viewLink.click();
   stage='cross-origin session writes denied';
   for(const route of ['/admin/impersonate?as=alice','/logout']){const response=await page.context().request.post(base+route,{headers:{Origin:'https://attacker.invalid'},maxRedirects:0});console.log('Cross-origin '+route.split('?')[0]+' HTTP '+response.status());assert.equal(response.status(),403);}
-  stage='confirm scoped view';await confirmDashboard();assert.equal((await who()).user,'alice');assert.equal((await who()).impersonating,true);
-  await page.locator('#impersonation-banner').waitFor({state:'visible'});await page.locator('#standalone-budget').waitFor({state:'visible'});
-  assert.ok(await page.evaluate(()=>document.querySelector('#impersonation-banner').getBoundingClientRect().bottom <= document.querySelector('#standalone-budget').getBoundingClientRect().top),'impersonation must precede budget');
+  stage='confirm scoped view';await confirmDashboard('/account');assert.equal((await who()).user,'alice');assert.equal((await who()).impersonating,true);
+  await page.locator('#account-impersonation').waitFor({state:'visible'});await page.locator('#kpi-budget-note').waitFor({state:'visible'});
+  assert.ok(await page.evaluate(()=>document.querySelector('#account-impersonation').getBoundingClientRect().bottom <= document.querySelector('#kpi-budget-note').getBoundingClientRect().top),'impersonation must precede budget');
   const keyResponse=await page.context().request.post(base+'/me/keys',{headers:{Origin:base},data:{name:'forbidden-impersonated-key',expiresIn:'1h'},maxRedirects:0});assert.equal(keyResponse.status(),403);
-  stage='return to administrator';await page.locator('#impersonation-banner').getByRole('link',{name:'Back to admin view',exact:true}).click();await dialog.waitFor();assert.equal((await who()).user,'alice');await confirmDashboard();assert.equal((await who()).user,'admin');assert.equal((await who()).impersonating,false);
+  stage='return to administrator';await page.locator('#account-impersonation').getByRole('link',{name:'Return to administrator view',exact:true}).click();await dialog.waitFor();assert.equal((await who()).user,'alice');await confirmDashboard();assert.equal((await who()).user,'admin');assert.equal((await who()).impersonating,false);
   stage='direct URL retains GET confirmation fallback';const fallback=await page.goto(base+'/admin/impersonate?as=admin');
   assert.equal(fallback.status(),200);assert.match(fallback.headers()['content-security-policy'],/default-src 'none'/);
   assert.equal(await page.evaluate(async()=>{try{await fetch('/api/v1/whoami');return false;}catch{return true;}}),true,'confirmation CSP must deny script-initiated API access');

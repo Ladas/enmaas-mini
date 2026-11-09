@@ -147,7 +147,7 @@ class InstallTest(unittest.TestCase):
             self.assertEqual(checkout.call_args_list[0].args[2], 'refs/heads/feature/test')
             self.assertEqual(args.maas_revision, resolved)
             self.assertEqual(checkout.call_args_list[1].args[2],
-                             'refs/heads/feat/standalone-demo-reuse-upstream-ui')
+                             'refs/heads/feat/latest-upstream-standalone')
             self.assertEqual(args.metering_revision, resolved)
             self.assertTrue(any('--revision' in c.args[0] and resolved in c.args[0]
                                 for c in run.call_args_list))

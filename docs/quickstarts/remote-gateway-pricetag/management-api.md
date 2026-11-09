@@ -1,6 +1,7 @@
 # Management CLI and API
 
-Use **Administration** for admin operations and **My keys** for personal key operations.
+Use **Administration** for admin operations and **My usage → API keys** for personal
+key operations in the source candidate. The previous published release uses **My keys**.
 For automation, `scripts/pricetag/manage` calls the private loopback API with the
 host's protected service credential. It does not print credentials or response
 bodies, and it refuses to overwrite response files.
@@ -40,7 +41,7 @@ python3 "$REPO/scripts/pricetag/api" GET /api/v1/management/users \
   --ca-file "$CLIENT_DIR/ca.pem" --output users.json
 ```
 
-Use an ordinary user's key with `/me/keys` or scoped dashboard APIs. Personal key
+Use an ordinary user's key with `/api/v1/me/keys` or `/api/v1/me/usage/summary`. Personal key
 operations cannot manage another user's keys, including when called by an admin.
 Supported methods: GET, POST, PUT, PATCH and DELETE. The helper also accepts `/api/v1/pricing?used=0` to list the complete catalog.
 Other query strings are rejected; use a direct authenticated API client for filtered reporting.

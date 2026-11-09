@@ -39,7 +39,9 @@ def endpoint(origin, path):
         raise ValueError('url must be an HTTPS origin')
     route = urllib.parse.urlsplit(path)
     allowed_query = route.path == '/api/v1/pricing' and route.query == 'used=0'
-    if route.scheme or route.netloc or (route.query and not allowed_query) or route.fragment or '%' in path or '..' in path or not (route.path in ('/api/v1/whoami', '/api/v1/pricing') or path.startswith(('/api/v1/management/', '/api/v1/admin/', '/api/v1/dashboard/', '/api/v1/org/', '/me/keys'))):
+    personal_route = route.path in ('/api/v1/me/keys', '/api/v1/me/usage/summary',
+                                    '/api/v1/me/usage/models', '/api/v1/me/usage/recent') or route.path.startswith('/api/v1/me/keys/')
+    if route.scheme or route.netloc or (route.query and not allowed_query) or route.fragment or '%' in path or '..' in path or not (personal_route or route.path in ('/api/v1/whoami', '/api/v1/pricing') or path.startswith(('/api/v1/management/', '/api/v1/admin/', '/api/v1/dashboard/', '/api/v1/org/', '/me/keys'))):
         raise ValueError('path must be a supported management API route without query or traversal')
     return origin.rstrip('/'), path
 

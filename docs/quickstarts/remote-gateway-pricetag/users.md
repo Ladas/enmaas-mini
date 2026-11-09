@@ -6,7 +6,8 @@ for inference: admin is quota-exempt.
 
 **Administration → Users** manages identities and manager relationships;
 **User quota** manages per-user USD overrides; **User keys** issues onboarding keys.
-**My keys** manages personal keys. The commands below use the same service APIs.
+**My usage → API keys** manages personal keys in the source candidate.
+The previous published release calls this **My keys**. The commands below use service APIs.
 
 ## Open the management session
 
@@ -114,10 +115,12 @@ The table defaults to five users per page. Select a row to inspect active keys
 and confirm **Revoke all keys**.
 
 **Administration → User keys → Issue onboarding key** adds a key; it does not replace existing keys. Choose **Copy key** or **Download .key**,
-then **Dismiss key**. The secret is never displayed or saved in browser storage.
+then **Dismiss key**. The secret is hidden by default and is not saved in browser storage.
 
-Users open **My keys** from the top navigation. The **My keys** tab lists keys;
-**Create key** issues a new key with private copy/download controls. Active keys appear first, with expiry
+Users open **API keys** on their account page (`/account?tab=keys`).
+**Create key** opens the issuance dialog with a name and lifetime. Download the
+key, confirm it has been saved, then close the dialog. The secret is hidden
+unless **Show** is selected; copy/download does not require revealing it. Active keys appear first, with expiry
 and remaining lifetime. **Revoke** stops a key; use the **Status** filter to view
 Active, Revoked, Expired or All records. Permanent deletion is not supported. The deployed MaaS cleanup
 API targets expired ephemeral keys, not ordinary revoked key records.
@@ -139,7 +142,7 @@ chmod 600 /path/to/pricetag.key
 As superadmin, select the user in **Administration → User keys → Issue onboarding key**
 and choose **View selected user’s usage** or **View selected user’s team**.
 Confirm **Continue**; no key needs to be issued or copied. The **Viewing as** banner
-identifies the target. Use **Back to admin view** and confirm to restore your view.
+identifies the target. Use **Return to administrator view** and confirm to restore your view.
 
 Impersonation is read-only and follows the target's current identity/team scope.
 It does not allow administrative changes or key issuance. To demonstrate the
@@ -219,7 +222,7 @@ reported old IDs after checking their status.
 | Set the default monthly allowance and post-limit model exceptions | Administrator **Safety Net** (`/api/v1/admin/safety-net`) |
 | Create users or change an individual allowance | Administration → Users / User quota → Per-user monthly quota overrides; SSH `scripts/pricetag/user` uses the same PriceTag APIs |
 | Issue onboarding keys | Administration → User keys → Issue onboarding key |
-| Create/search/revoke your own keys | My keys (`/management`): search by name or ID, filter Active/Revoked/Expired/All, and select 5/20/50 rows per page; SSH `scripts/pricetag/maas-key` remains available |
+| Create/search/revoke your own keys | My usage → API keys (`/account?tab=keys`): search by name or ID, filter Active/Revoked/Expired/All, and select 5/20/50 rows per page; SSH `scripts/pricetag/maas-key` remains available |
 | Configure providers, credentials and advertised models | SSH [provider helper](providers.md) |
 | View personal/team spending | Usage is personal for users/managers; My team follows manager relationships |
 | Inspect a user’s scoped view without their key | Superadmin View / Team links; read-only impersonation with confirmed return |
