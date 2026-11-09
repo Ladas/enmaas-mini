@@ -39,13 +39,18 @@ assert 'prepare' not in sys.modules
             with self.assertRaisesRegex(ValueError, 'amd64'):
                 images.verify_metadata({**metadata, 'Architecture': 'arm64'}, 'expected')
 
-    def test_publisher_and_installer_use_the_same_repositories_and_sources(self):
+    def test_publisher_and_installer_use_the_same_repositories_and_pinned_sources(self):
         workflow = yaml.safe_load((ROOT / '.github/workflows/pricetag-images.yml').read_text())
         job = workflow['jobs']['build-test-publish']
         for component in ('MAAS', 'METERING'):
             image = getattr(installer, 'PUBLISHED_' + component + '_IMAGE')
             self.assertEqual(image.split('@')[0], job['env'][component + '_IMAGE'])
-            self.assertEqual(getattr(installer, component + '_COMMIT'), job['env'][component + '_REVISION'])
+            # Publication must precede switching the installer to the new digest.
+            # These pins can differ; published-images.py verifies the installer's
+            # digest against its own source revision, not the next build target.
+            self.assertRegex(getattr(installer, component + '_COMMIT'), r'^[0-9a-f]{40}$')
+            self.assertRegex(job['env'][component + '_REVISION'], r'^[0-9a-f]{40}$')
+            self.assertRegex(image, r'@sha256:[0-9a-f]{64}$')
             self.assertIn(image, (ROOT / 'docs/quickstarts/remote-gateway-pricetag/manual.md').read_text())
         publish = next(step for step in job['steps'] if step.get('name') == 'Publish tested images')
         for condition in (job['environment'], publish['if']):
