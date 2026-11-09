@@ -166,7 +166,7 @@ trusts identity assertions from selected host-loopback and fixed container
 addresses. **Host administrators, Praxis and PriceTag are privileged peers in
 this protocol**, even though their containers are rootless. A compromised trusted
 peer could assert administrative identity; public route containment does not
-solve that internal boundary. See [hardening follow-up #58](https://github.com/redhat-et/enmaas-mini/issues/58).
+solve that internal boundary. See [hardening follow-up #3](https://github.com/redhat-et/enmaas-mini/issues/3).
 
 ## Models, routing and prices
 
@@ -235,17 +235,16 @@ This is follow-up work, not a reason to introduce a Kubernetes API into the host
 
 ## Qualification and remaining work
 
-[Core tracking #45](https://github.com/redhat-et/enmaas-mini/issues/45)
-and [follow-up #58](https://github.com/redhat-et/enmaas-mini/issues/58)
+[Core tracking #2](https://github.com/redhat-et/enmaas-mini/issues/2)
+and [follow-up #3](https://github.com/redhat-et/enmaas-mini/issues/3)
 cover source convergence, stronger service authentication, authenticated catalog
 access, session invalidation, storage retention, recovery and release qualification.
 The installer is for fresh hosts, not a coordinated upgrade/rollback system.
 Public DNS/certificate automation and OIDC are not configured by this quickstart.
 
-[Inference guards #100](https://github.com/redhat-et/enmaas-mini/pull/100)
-adds explicit upgrade rejection and further streaming-accounting qualification;
-those changes are not part of this page's merged baseline. A working stream is
-not proof that cancellation/failure accounting is complete.
+See the [routing reference](../../development/pricetag-routing.md) for enabled
+inference guards and their tests. A working stream is not proof that
+cancellation/failure accounting is complete.
 
 For evidence and limitations, use the [pilot reference](../../testing/pricetag.md),
 [mock API/browser suite](../../testing/pricetag-demo-ci.md) and

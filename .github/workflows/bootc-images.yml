@@ -37,6 +37,13 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Explain optional build configuration
+        env:
+          BUILDS_ENABLED: ${{ vars.BOOTC_IMAGE_BUILDS_ENABLED }}
+        run: |
+          if [[ "$BUILDS_ENABLED" != true ]]; then
+            echo "Bootc image builds are disabled. Configure the protected environments and set BOOTC_IMAGE_BUILDS_ENABLED=true; see bootc/README.md." >>"$GITHUB_STEP_SUMMARY"
+          fi
       - name: Select changed image groups
         id: select
         shell: bash
@@ -66,6 +73,8 @@ jobs:
     needs: changes
     if: >-
       ${{
+        github.repository == 'redhat-et/enmaas-mini' &&
+        vars.BOOTC_IMAGE_BUILDS_ENABLED == 'true' &&
         (github.event_name != 'pull_request' ||
          github.event.pull_request.head.repo.fork == false) &&
         (github.event_name != 'workflow_dispatch' ||
@@ -97,11 +106,14 @@ jobs:
           RHSM_ACTIVATION_KEY: ${{ secrets.RHSM_ACTIVATION_KEY }}
         run: |
           set -euo pipefail
-          test -n "$RHEL_BOOTC_IMAGE"
-          test -n "$REDHAT_REGISTRY_USERNAME"
-          test -n "$REDHAT_REGISTRY_PASSWORD"
-          test -n "$RHSM_ORG_ID"
-          test -n "$RHSM_ACTIVATION_KEY"
+          missing=0
+          for name in RHEL_BOOTC_IMAGE REDHAT_REGISTRY_USERNAME REDHAT_REGISTRY_PASSWORD RHSM_ORG_ID RHSM_ACTIVATION_KEY; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing bootc build setting: ${name}. See bootc/README.md."
+              missing=1
+            fi
+          done
+          [[ "$missing" == 0 ]]
       - name: Authenticate to Red Hat Registry
         env:
           REDHAT_REGISTRY_USERNAME: ${{ secrets.REDHAT_REGISTRY_USERNAME }}

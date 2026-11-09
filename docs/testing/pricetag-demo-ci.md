@@ -6,8 +6,8 @@ demo sources, starts PostgreSQL and Praxis, and runs the API/browser/quota suite
 against synthetic inference. No provider keys, SSH credentials or publishing
 secrets are required.
 
-The [management demo #91](https://github.com/redhat-et/enmaas-mini/pull/91)
-and [image publication #92](https://github.com/redhat-et/enmaas-mini/pull/92)
+The [management demo #91](https://github.com/redhat-et/secure-single-server/pull/91)
+and [image publication #92](https://github.com/redhat-et/secure-single-server/pull/92)
 are merged. Source builds use the same reviewed revisions as publication;
 replacing them with qualified registry digests is a later optimization.
 

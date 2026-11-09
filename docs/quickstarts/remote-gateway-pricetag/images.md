@@ -11,6 +11,9 @@ Praxis and PostgreSQL remain pinned published images in either mode.
 
 The installer checks image source labels and CPU architecture.
 
+Application images retain their existing `secure-single-server-*` registry
+names; moving the source repository does not change installed image digests.
+
 ## Open the installation session
 
 For a **fresh host**, run from the workstation installation shell:
@@ -28,8 +31,8 @@ Run examples below in **this SSH session**. New shell? Restore
 Publication repositories:
 
 ```text
-quay.io/redhat-et/enmaas-mini-maas-standalone
-quay.io/redhat-et/enmaas-mini-pricetag-metering
+quay.io/redhat-et/secure-single-server-maas-standalone
+quay.io/redhat-et/secure-single-server-pricetag-metering
 ```
 
 The published images target `linux/amd64`. They are pinned in

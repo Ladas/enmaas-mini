@@ -29,7 +29,7 @@ jobs:
   build-test-publish:
     runs-on: ubuntu-24.04
     # Quay credentials are environment secrets, as in the bootc publisher.
-    environment: ${{ github.repository == 'redhat-et/secure-single-server' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'bootc-image-main' || 'bootc-image-pr' }}
+    environment: ${{ github.repository == 'redhat-et/enmaas-mini' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'bootc-image-main' || 'bootc-image-pr' }}
     timeout-minutes: 60
     env:
       MAAS_REVISION: 6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d
@@ -78,7 +78,7 @@ jobs:
       - name: Test both services with PostgreSQL
         run: sudo python3 tests/pricetag/component-images.py --maas-image localhost/maas:ci --metering-image localhost/metering:ci
       - name: Publish tested images
-        if: github.repository == 'redhat-et/secure-single-server' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: github.repository == 'redhat-et/enmaas-mini' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
           QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
           QUAY_TOKEN: ${{ secrets.QUAY_TOKEN }}

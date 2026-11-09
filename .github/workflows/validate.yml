@@ -58,6 +58,9 @@ jobs:
         run: python3 tests/mocked-provider.py --suite offline --engine docker
       - name: Check external-client TLS, caller fixtures, isolation and cancellation
         run: python3 -B tests/remote-client/unit.py
+      - name: Verify anonymous pulls of released installer images
+        if: matrix.arch == 'amd64'
+        run: python3 tests/pricetag/published-images.py --engine docker
       - name: Check bootc build contract without registry credentials
         run: |
           python3 bootc/tests/build.py
