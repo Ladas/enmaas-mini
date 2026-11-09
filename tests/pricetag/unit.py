@@ -35,6 +35,12 @@ maas_loader = importlib.machinery.SourceFileLoader('pricetag_maas_key', str(ROOT
 maas_spec = importlib.util.spec_from_loader(maas_loader.name, maas_loader)
 maas_key = importlib.util.module_from_spec(maas_spec)
 maas_loader.exec_module(maas_key)
+external_database_loader = importlib.machinery.SourceFileLoader(
+    'pricetag_external_database', str(ROOT / 'scripts/pricetag/external-database'))
+external_database_spec = importlib.util.spec_from_loader(
+    external_database_loader.name, external_database_loader)
+external_database = importlib.util.module_from_spec(external_database_spec)
+external_database_loader.exec_module(external_database)
 
 
 class PreparationTest(unittest.TestCase):
@@ -210,6 +216,158 @@ class PreparationTest(unittest.TestCase):
         self.assertIn("ALTER ROLE maas LOGIN PASSWORD 'maas-pw'", sql)
         self.assertIn("rolname='metering'", sql)
         self.assertIn("datname='maas'", sql)
+
+    def test_external_database_urls_require_complete_secure_connections(self):
+        valid = 'postgresql://maas:secret@db.example:5432/maas?sslmode=require'
+        parsed = prepare.validate_external_database_url(valid)
+        self.assertEqual((parsed['host'], parsed['port'], parsed['database']), ('db.example', 5432, 'maas'))
+        for invalid in (
+                'postgres://maas:secret@db.example:5432/maas?sslmode=disable',
+                'postgresql://maas:secret@db.example:5432/maas',
+                'postgresql://maas@db.example:5432/maas?sslmode=require',
+                'mysql://maas:secret@db.example:5432/maas?sslmode=require'):
+            with self.assertRaises(ValueError):
+                prepare.validate_external_database_url(invalid)
+
+    def test_external_database_environment_and_application_url_are_derived_safely(self):
+        url = ('postgresql://maas:p%40ss%2Fword@db.example:5432/maas'
+               '?sslmode=require&connect_timeout=3&application_name=test')
+        environment = prepare.external_client_environment(url, 'maas', False)
+        self.assertEqual(environment, {
+            'PGHOST': 'db.example', 'PGPORT': '5432', 'PGUSER': 'maas',
+            'PGDATABASE': 'maas', 'PGSSLMODE': 'require',
+            'PGCONNECT_TIMEOUT': '3'})
+        self.assertEqual(prepare.external_password_file('p@ss word'),
+                         "export PGPASSWORD='p@ss word'\n")
+        rendered = prepare.external_application_url(url, False)
+        self.assertIn('p%40ss%2Fword@db.example:5432/maas', rendered)
+        self.assertIn('application_name=test', rendered)
+        self.assertIn('connect_timeout=3', rendered)
+
+    def test_external_database_url_rejects_target_and_credential_query_overrides(self):
+        url = ('postgresql://maas:secret@db.example:5432/maas'
+               '?sslmode=require&host=other.example&user=other&dbname=other')
+        with self.assertRaisesRegex(ValueError, 'unsupported query parameters'):
+            prepare.validate_external_database_url(url)
+
+    def test_external_database_url_rejects_duplicates_and_encoded_control_characters(self):
+        base = 'postgresql://maas:secret@db.example:5432/maas?sslmode=require'
+        for suffix in ('&sslmode=verify-full', '&sslmode=require&sslmode=require'):
+            with self.assertRaisesRegex(ValueError, 'repeat query parameters'):
+                prepare.validate_external_database_url(base + suffix)
+        for url in (
+                'postgresql://maas:sec%0Aret@db.example:5432/maas?sslmode=require',
+                'postgresql://maas:secret@db.example:5432/maas?sslmode=require&application_name=ba%0Ad'):
+            with self.assertRaisesRegex(ValueError, 'control characters'):
+                prepare.validate_external_database_url(url)
+
+    def test_external_database_url_validates_hostaddr_and_connection_timeout(self):
+        base = 'postgresql://maas:secret@db.example:5432/maas?sslmode=require'
+        for query in ('hostaddr=db.example', 'connect_timeout=0', 'connect_timeout=31',
+                      'connect_timeout=three'):
+            with self.assertRaises(ValueError):
+                prepare.validate_external_database_url(base + '&' + query)
+        parsed = prepare.validate_external_database_url(base + '&hostaddr=10.0.0.8&connect_timeout=5')
+        self.assertEqual(parsed['hostaddr'], '10.0.0.8')
+        self.assertEqual(parsed['connect_timeout'], '5')
+
+    def test_external_database_hostaddr_controls_helper_connections(self):
+        url = 'postgresql://maas:secret@db.example:5432/maas?sslmode=require&hostaddr=10.0.0.8'
+        parsed = prepare.validate_external_database_url(url)
+        self.assertEqual(parsed['hostaddr'], '10.0.0.8')
+        self.assertEqual(prepare.external_database_server(parsed), ('10.0.0.8', 5432))
+        environment = prepare.external_client_environment(url, 'maas', False)
+        self.assertEqual(environment['PGHOST'], 'db.example')
+        self.assertEqual(environment['PGHOSTADDR'], '10.0.0.8')
+
+    def test_external_database_urls_must_use_the_same_effective_server(self):
+        maas = 'postgresql://maas:secret@10.0.0.8:5432/maas?sslmode=require'
+        metering = 'postgresql://metering:secret@db.example:5432/metering?sslmode=require&hostaddr=10.0.0.9'
+        with self.assertRaisesRegex(ValueError, 'external maas URL must not use hostaddr'):
+            prepare.validate_external_database_urls(
+                maas.replace('10.0.0.8', 'db.example') + '&hostaddr=10.0.0.8', metering)
+        with self.assertRaisesRegex(ValueError, 'same effective database server'):
+            prepare.validate_external_database_urls(maas, metering)
+        metering_matching = metering.replace('hostaddr=10.0.0.9', 'hostaddr=10.0.0.8')
+        matching = prepare.validate_external_database_urls(
+            maas, metering_matching)
+        self.assertEqual(prepare.external_database_server(matching['maas']),
+                         prepare.external_database_server(matching['metering']))
+
+    def test_external_database_urls_require_matching_component_targets(self):
+        maas = 'postgresql://maas:secret@db.example:5432/maas?sslmode=require'
+        metering = 'postgresql://metering:secret@db.example:5432/metering?sslmode=require'
+        with self.assertRaisesRegex(ValueError, 'external metering URL must target'):
+            prepare.validate_external_database_urls(
+                maas, metering.replace('/metering?', '/maas?'))
+        with self.assertRaisesRegex(ValueError, 'external metering URL must target'):
+            prepare.validate_external_database_urls(
+                maas, metering.replace('metering:', 'maas:'))
+
+    def test_external_application_url_normalizes_sslmode_case(self):
+        rendered = prepare.external_application_url(
+            'postgresql://maas:secret@db.example:5432/maas?sslmode=VERIFY-FULL', False)
+        self.assertIn('sslmode=verify-full', rendered)
+
+    def test_external_database_urls_are_validated_before_output_directories(self):
+        source = prepare.__file__
+        text = Path(source).read_text()
+        validation = text.index('external_database = None')
+        output = text.index('args.admin_directory.mkdir')
+        self.assertLess(validation, output)
+
+    def test_external_database_certificate_mode_requires_matching_ca_configuration(self):
+        url = 'postgresql://maas:secret@db.example:5432/maas?sslmode=verify-full'
+        with self.assertRaises(ValueError):
+            prepare.validate_external_database_url(url)
+        with tempfile.TemporaryDirectory() as directory:
+            certificate = Path(directory) / 'ca.crt'
+            certificate.write_text('certificate fixture\n')
+            parsed = prepare.validate_external_database_url(url, certificate)
+            self.assertEqual(parsed['sslmode'], 'verify-full')
+        require_url = 'postgresql://maas:secret@db.example:5432/maas?sslmode=require'
+        with self.assertRaises(ValueError):
+            prepare.validate_external_database_url(require_url, certificate)
+
+    def test_external_database_client_command_uses_private_env_file(self):
+        with patch.object(external_database, 'service_prefix', return_value=['sudo']):
+            command = external_database.client_command(Path('/etc/praxis-pricetag/external-maas-db.env'))
+        self.assertIn('--env-file', command)
+        self.assertIn('/etc/praxis-pricetag/external-maas-db.password:/run/secrets/external-db-password:ro', command)
+        rendered_command = ' '.join(map(str, command))
+        self.assertNotIn('PGPASSWORD=', rendered_command)
+        self.assertNotIn('p@ss/word', rendered_command)
+        self.assertIn('--pull=never', command)
+        self.assertTrue(command[command.index('--name') + 1].startswith('pricetag-external-check-'))
+
+    def test_external_database_client_runs_outside_inaccessible_checkout(self):
+        result = type('Result', (), {'stdout': '1\n'})()
+        with tempfile.TemporaryDirectory() as directory:
+            environment_file = Path(directory) / 'external-maas-db.env'
+            environment_file.write_text('PGCONNECT_TIMEOUT=3\n')
+            with patch.object(external_database, 'service_prefix', return_value=['sudo']), \
+                patch.object(external_database.subprocess, 'run', return_value=result) as execute:
+                self.assertEqual(external_database.psql(environment_file), '1')
+            self.assertEqual(execute.call_args.kwargs['cwd'], '/tmp')
+            self.assertEqual(execute.call_args.kwargs['timeout'], 13)
+
+    def test_external_database_timeout_cleans_up_client_container_without_credentials(self):
+        timeout = external_database.subprocess.TimeoutExpired(['safe-command'], 13)
+        with patch.object(external_database, 'connection_timeout', return_value=3), \
+                patch.object(external_database, 'service_prefix', return_value=['sudo']), \
+                patch.object(external_database.subprocess, 'run',
+                             side_effect=[timeout, type('Result', (), {'returncode': 0})()]) as execute:
+            with self.assertRaisesRegex(RuntimeError, 'timed out after 13 seconds'):
+                external_database.psql(Path('/etc/praxis-pricetag/external-maas-db.env'))
+        first_command = execute.call_args_list[0].args[0]
+        container_name = first_command[first_command.index('--name') + 1]
+        self.assertTrue(container_name.startswith('pricetag-external-check-'))
+        self.assertEqual(execute.call_args_list[1].args[0],
+                         ['sudo', 'podman', 'rm', '-f', container_name])
+
+    def test_unmanaged_mock_provider_supports_capacity_backlog(self):
+        source = (ROOT / 'tests/pricetag/provider.py').read_text()
+        self.assertIn("if managed else Provider(host='0.0.0.0', local=True, request_backlog=512)", source)
 
     def test_gateway_quadlet_keeps_required_lines_without_provider_secrets(self):
         body = prepare.gateway_quadlet_body('sha256:' + 'a' * 64, [], 'Volume=/tmp/pricetag-fixture:/etc/praxis:ro,Z\n', True)

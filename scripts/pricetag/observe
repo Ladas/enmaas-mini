@@ -10,6 +10,8 @@ import re
 import subprocess
 import time
 
+ROOT = Path(__file__).resolve().parents[2]
+DEPLOY = Path('/etc/praxis-pricetag')
 SERVICES = ['pricetag-' + name for name in ('gateway', 'maas', 'metering', 'db', 'provider')]
 SQL = """
 SET statement_timeout = '10s';
@@ -36,6 +38,28 @@ SELECT json_build_object(
     FROM pg_replication_slots) s)
 );
 """
+EXTERNAL_SQL = """
+SET statement_timeout = '10s';
+SELECT json_build_object(
+  'database_bytes', pg_database_size(current_database()),
+  'wal_directory_bytes', NULL::bigint,
+  'usage_events', (SELECT count(*) FROM usage_events),
+  'tables', (SELECT json_agg(t) FROM (
+    SELECT relname, n_live_tup, n_dead_tup, last_autovacuum, last_autoanalyze,
+           pg_total_relation_size(relid) AS total_bytes,
+           pg_indexes_size(relid) AS index_bytes
+    FROM pg_stat_user_tables ORDER BY pg_total_relation_size(relid) DESC) t),
+  'wal', NULL::json,
+  'database_stats', (SELECT row_to_json(d) FROM (
+    SELECT xact_commit,xact_rollback,blks_read,blks_hit,temp_files,temp_bytes,deadlocks
+    FROM pg_stat_database WHERE datname=current_database()) d),
+  'settings', (SELECT json_object_agg(name,setting) FROM pg_settings WHERE name IN (
+    'autovacuum','autovacuum_vacuum_scale_factor','autovacuum_analyze_scale_factor',
+    'max_wal_size','min_wal_size','wal_keep_size','max_slot_wal_keep_size',
+    'archive_mode','checkpoint_timeout','logging_collector','log_rotation_age','log_rotation_size')),
+  'replication_slots', NULL::json
+);
+"""
 
 
 def command(argv, json_output=False):
@@ -47,6 +71,7 @@ def command(argv, json_output=False):
 
 
 def sample(prefix, database_name="metering"):
+    """Collect one timestamped health, service, and database snapshot."""
     if not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", database_name):
         raise ValueError("invalid database name")
     memory = {}
@@ -66,24 +91,34 @@ def sample(prefix, database_name="metering"):
               'cpu_ticks': list(map(int, Path('/proc/stat').read_text().splitlines()[0].split()[1:])),
               'pressure': {name: Path('/proc/pressure', name).read_text().strip()
                            for name in ('cpu', 'memory', 'io') if Path('/proc/pressure', name).exists()}}
-    record['containers'] = command(prefix + ['podman', 'stats', '--no-stream', '--format', 'json', *SERVICES], True)
-    record['services'] = command(prefix + ['systemctl', '--user', 'show', *[s + '.service' for s in SERVICES],
+    external_database = (DEPLOY / 'external-maas-db.env').is_file()
+    observed_services = [service for service in SERVICES
+                         if not external_database or service != 'pricetag-db']
+    record['containers'] = command(prefix + ['podman', 'stats', '--no-stream', '--format', 'json',
+                                             *observed_services], True)
+    record['services'] = command(prefix + ['systemctl', '--user', 'show',
+                                             *[service + '.service' for service in observed_services],
         '--property=Id,ActiveState,NRestarts,MemoryCurrent,MemoryPeak,CPUUsageNSec,TasksCurrent,Result'])
-    database_user = 'postgres'
-    probe = prefix + ['podman', 'exec', 'pricetag-db', 'psql', '-X', '-qAt',
-        '-U', database_user, '-d', database_name, '-c', 'SELECT 1']
-    if command(probe) != '1':
-        database_user = 'metering'
-    record['postgres'] = command(prefix + ['podman', 'exec', 'pricetag-db', 'psql', '-X', '-qAt',
-        '-U', database_user, '-d', database_name, '-v', 'ON_ERROR_STOP=1', '-c', SQL], True)
+    if external_database:
+        record['postgres'] = command(['python3', str(ROOT / 'scripts/pricetag/external-database'),
+                                      'query', EXTERNAL_SQL], True)
+    else:
+        database_user = 'postgres'
+        probe = prefix + ['podman', 'exec', 'pricetag-db', 'psql', '-X', '-qAt',
+            '-U', database_user, '-d', 'metering', '-c', 'SELECT 1']
+        if command(probe) != '1':
+            database_user = 'metering'
+        record['postgres'] = command(prefix + ['podman', 'exec', 'pricetag-db', 'psql', '-X', '-qAt',
+            '-U', database_user, '-d', database_name, '-v', 'ON_ERROR_STOP=1', '-c', SQL], True)
     record['journal_usage'] = command(['journalctl', '--disk-usage'])
     record['container_storage'] = command(prefix + ['podman', 'system', 'df', '--format', 'json'], True)
     record['log_config'] = {name: command(prefix + ['podman', 'inspect', '--format',
-        '{{json .HostConfig.LogConfig}}', name], True) for name in SERVICES}
+        '{{json .HostConfig.LogConfig}}', name], True) for name in observed_services}
     return record
 
 
 def main():
+    """Continuously sample deployment health into a private JSONL file."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--database-name', default='metering', help='database to measure; set explicitly for an upgrade clone')
