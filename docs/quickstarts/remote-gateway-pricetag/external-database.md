@@ -30,9 +30,8 @@ Each URL must:
 - target the exact database shown above;
 - set `sslmode=require` or `sslmode=verify-full`;
 - optionally set `connect_timeout` to an integer from 1 through 30 seconds;
-- optionally set `application_name`; metering may also set `hostaddr` to an
-  IPv4 or IPv6 address that resolves to the same effective server and port as
-  the MaaS URL.
+- optionally set `application_name`; metering may also set `hostaddr` to the
+  same literal IPv4 or IPv6 address and port used by the MaaS URL.
 - use a hostname reachable from the deployment host and its Podman network.
 
 Other URI query parameters, including parameters that override the host, role,

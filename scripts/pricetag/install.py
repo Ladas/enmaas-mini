@@ -395,7 +395,7 @@ def acquire_images(args, arch):
 
 def install(args):
     sys.path.insert(0, str(ROOT / 'scripts/pricetag'))
-    from prepare import POSTGRES, validate_external_database_url
+    from prepare import POSTGRES, validate_external_database_urls
     apis = {'openai': 'OpenAI-compatible', 'anthropic': 'Anthropic Messages',
             'both': 'OpenAI-compatible + Anthropic Messages'}
     providers = {'openai': 'OpenAI', 'external': 'External (' + apis.get(args.external_api, 'both APIs') + ')',
@@ -426,16 +426,9 @@ def install(args):
         return
     if args.maas_database_url_file is not None:
         try:
-            maas_url = validate_external_database_url(args.maas_database_url_file.read_text(),
-                                                      args.external_database_ca_file)
-            metering_url = validate_external_database_url(args.metering_database_url_file.read_text(),
-                                                          args.external_database_ca_file)
-            if maas_url['database'] != 'maas' or maas_url['username'] != 'maas':
-                raise ValueError('external MaaS URL must target the maas database and role')
-            if metering_url['database'] != 'metering' or metering_url['username'] != 'metering':
-                raise ValueError('external metering URL must target the metering database and role')
-            if (maas_url['host'], maas_url['port']) != (metering_url['host'], metering_url['port']):
-                raise ValueError('external MaaS and metering URLs must use the same database server address and port')
+            validate_external_database_urls(args.maas_database_url_file.read_text(),
+                                            args.metering_database_url_file.read_text(),
+                                            args.external_database_ca_file)
         except (OSError, ValueError) as error:
             raise ValueError(str(error)) from None
     preflight(args.mode)
