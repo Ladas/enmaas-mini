@@ -69,7 +69,7 @@ def main():
             run(PODMAN + ['restart', container])
             wait_for_postgres(container)
             for role in ('maas', 'metering'):
-                role_password = secrets.token_urlsafe(24) + '\n' + secrets.token_urlsafe(12)
+                role_password = secrets.token_urlsafe(24)
                 run(PODMAN + ['exec', container, 'psql', '-U', 'postgres', '-d', 'postgres',
                      '-c', f"CREATE ROLE {role} LOGIN PASSWORD '{role_password}';"])
                 run(PODMAN + ['exec', container, 'psql', '-U', 'postgres', '-d', 'postgres',

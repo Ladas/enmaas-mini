@@ -3,23 +3,31 @@
 import argparse
 from pathlib import Path
 import pwd
+import re
 import shlex
 import subprocess
 import sys
+import uuid
 
 POSTGRES = 'docker.io/library/postgres@sha256:996e9dc583ba9f0265a2c75547a9c95fb22c251e394749cab205a0a00e1856a1'
 DEPLOY = Path('/etc/praxis-pricetag')
+CHECK_TIMEOUT_GRACE = 10
 
 
 def service_prefix():
+    """Return the privileged prefix for commands run as the service user."""
     uid = pwd.getpwnam('praxis-svc').pw_uid
     return ['sudo', '-u', 'praxis-svc', 'env', f'XDG_RUNTIME_DIR=/run/user/{uid}',
             f'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus']
 
 
-def client_command(environment_file, command='SELECT 1'):
+def client_command(environment_file, command='SELECT 1', container_name=None):
+    """Build a credential-isolated Podman command for one psql query."""
     password_file = environment_file.with_suffix('.password')
-    arguments = service_prefix() + ['podman', 'run', '--rm', '--network', 'pricetag-private',
+    container_name = container_name or 'pricetag-external-check-' + uuid.uuid4().hex[:12]
+    arguments = service_prefix() + ['podman', 'run', '--rm', '--pull=never',
+                                    '--name', container_name,
+                                    '--network', 'pricetag-private',
                                     '--env-file', environment_file]
     if (DEPLOY / 'external-ca.crt').is_file():
         arguments += ['-v', f'{DEPLOY / "external-ca.crt"}:/etc/pricetag-external-ca.crt:ro']
@@ -34,12 +42,32 @@ def client_command(environment_file, command='SELECT 1'):
 
 
 def psql(environment_file, command='SELECT 1'):
-    arguments = client_command(environment_file, command)
-    return subprocess.run(arguments, check=True, text=True, stdout=subprocess.PIPE,
-                          cwd='/tmp').stdout.strip()
+    """Run psql with a bounded deadline and return its stripped output."""
+    timeout = connection_timeout(environment_file) + CHECK_TIMEOUT_GRACE
+    container_name = 'pricetag-external-check-' + uuid.uuid4().hex[:12]
+    arguments = client_command(environment_file, command, container_name)
+    try:
+        return subprocess.run(arguments, check=True, text=True, stdout=subprocess.PIPE,
+                              cwd='/tmp', timeout=timeout).stdout.strip()
+    except subprocess.TimeoutExpired as error:
+        subprocess.run(service_prefix() + ['podman', 'rm', '-f', container_name],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        raise RuntimeError(f'external database command timed out after {timeout} seconds') from error
+
+
+def connection_timeout(environment_file):
+    """Read and validate the generated PostgreSQL connection timeout."""
+    timeout = None
+    for line in environment_file.read_text().splitlines():
+        if line.startswith('PGCONNECT_TIMEOUT='):
+            timeout = line.split('=', 1)[1]
+    if timeout is None or re.fullmatch(r'[0-9]{1,2}', timeout) is None or not 1 <= int(timeout) <= 30:
+        raise RuntimeError('external database environment has an invalid connection timeout')
+    return int(timeout)
 
 
 def main():
+    """Check or query the prepared external database connections."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=('check', 'usage-count', 'query'))
     parser.add_argument('sql', nargs='?')
@@ -48,8 +76,11 @@ def main():
         parser.error('query requires SQL')
     if args.action == 'check':
         for name in ('metering', 'maas'):
-            result = psql(DEPLOY / f'external-{name}-db.env',
-                          command=f"SELECT current_user || ':' || current_database()")
+            try:
+                result = psql(DEPLOY / f'external-{name}-db.env',
+                              command=f"SELECT current_user || ':' || current_database()")
+            except subprocess.CalledProcessError as error:
+                raise RuntimeError(f'external {name} database connection check failed') from error
             if result != f'{name}:{name}':
                 raise RuntimeError(f'external {name} database connection did not use the expected database and role')
     else:

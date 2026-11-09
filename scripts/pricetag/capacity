@@ -51,6 +51,7 @@ def suspend_synthetic(prefixes, request):
 
 
 def main():
+    """Run bounded streaming-capacity sweeps with synthetic accounts."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--rates', nargs='+', type=int, default=[30, 1000])
     parser.add_argument('--cases', nargs='+', default=['1x16', '20x1', '20x4', '20x16', '50x8'], help='users x simultaneous request streams per user')

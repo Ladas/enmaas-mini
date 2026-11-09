@@ -71,6 +71,7 @@ def check_sample(record):
 
 
 def main():
+    """Run the mock-only multi-user benchmark and preserve its artifacts."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--requests', type=int, choices=range(1, 1001), default=100,
                         help='requests per user per phase; default 100 gives 3600 requests')

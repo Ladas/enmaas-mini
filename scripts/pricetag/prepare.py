@@ -2,6 +2,7 @@
 """Prepare an isolated rootless Quadlet deployment; do not start services."""
 import argparse
 import copy
+import ipaddress
 import json
 import os
 import shlex
@@ -11,6 +12,7 @@ import re
 import secrets
 import shutil
 import subprocess
+import unicodedata
 from urllib.parse import parse_qsl, quote, unquote, urlsplit, urlunsplit
 
 from gateway import render
@@ -18,6 +20,8 @@ from gateway import render
 ROOT = Path(__file__).resolve().parents[2]
 POSTGRES = 'docker.io/library/postgres@sha256:996e9dc583ba9f0265a2c75547a9c95fb22c251e394749cab205a0a00e1856a1'
 PYTHON = 'docker.io/library/python@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7'
+EXTERNAL_DATABASE_QUERY_KEYS = {'sslmode', 'hostaddr', 'connect_timeout', 'application_name'}
+EXTERNAL_DATABASE_TIMEOUT = 10
 
 
 def literal(value):
@@ -73,15 +77,42 @@ def validate_external_database_url(url_text, ca_file=None, ca_required=True):
     parsed = urlsplit(url_text.strip())
     if parsed.scheme not in ('postgres', 'postgresql'):
         raise ValueError('external database URL must use postgres:// or postgresql://')
+    if parsed.fragment:
+        raise ValueError('external database URL must not include a fragment')
     if not parsed.hostname or not parsed.port or not parsed.username or not parsed.password:
         raise ValueError('external database URL must include host, port, username and password')
+    if not 1 <= parsed.port <= 65535:
+        raise ValueError('external database URL port must be between 1 and 65535')
     database = parsed.path.lstrip('/')
     if not re.fullmatch(r'[A-Za-z0-9_.-]+', database):
         raise ValueError('external database URL must name a single maintenance database')
-    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query_items = parse_qsl(parsed.query, keep_blank_values=True)
+    query_keys = [key for key, _ in query_items]
+    if len(query_keys) != len(set(query_keys)):
+        raise ValueError('external database URL must not repeat query parameters')
+    unsupported = [key for key in query_keys if key not in EXTERNAL_DATABASE_QUERY_KEYS]
+    if unsupported:
+        raise ValueError('external database URL contains unsupported query parameters: ' + ', '.join(sorted(set(unsupported))))
+    query = dict(query_items)
+    username = unquote(parsed.username)
+    password = unquote(parsed.password)
+    for field, value in (('username', username), ('password', password),
+                         ('host', parsed.hostname), ('database', database)):
+        if any(unicodedata.category(character) == 'Cc' for character in value):
+            raise ValueError(f'external database URL {field} must not contain control characters')
+    for key, value in query_items:
+        if any(unicodedata.category(character) == 'Cc' for character in value):
+            raise ValueError(f'external database URL {key} query parameter must not contain control characters')
+    connect_timeout = query.get('connect_timeout')
+    if connect_timeout is not None and (re.fullmatch(r'[0-9]{1,2}', connect_timeout) is None
+                                        or not 1 <= int(connect_timeout) <= 30):
+        raise ValueError('external database URL connect_timeout must be an integer from 1 to 30 seconds')
     hostaddr = query.get('hostaddr')
-    if 'hostaddr' in query and not hostaddr:
-        raise ValueError('external database URL hostaddr must not be empty')
+    if 'hostaddr' in query:
+        try:
+            ipaddress.ip_address(hostaddr)
+        except ValueError as error:
+            raise ValueError('external database URL hostaddr must be an IPv4 or IPv6 address') from error
     sslmode = query.get('sslmode', '').lower()
     if sslmode not in ('require', 'verify-full'):
         raise ValueError('external database URL must set sslmode=require or sslmode=verify-full')
@@ -101,14 +132,18 @@ def validate_external_database_url(url_text, ca_file=None, ca_required=True):
         'password': unquote(parsed.password),
         'database': database,
         'sslmode': sslmode,
+        'connect_timeout': connect_timeout,
+        'query': [(key, value.lower() if key == 'sslmode' else value) for key, value in query_items],
     }
 
 
 def external_database_server(config):
+    """Return the effective server address and port for a validated URL."""
     return config['hostaddr'] or config['host'], config['port']
 
 
 def validate_external_database_urls(maas_url, metering_url, ca_file=None):
+    """Validate both application URLs and their shared database server."""
     external_database = {
         'maas': validate_external_database_url(maas_url, ca_file),
         'metering': validate_external_database_url(metering_url, ca_file),
@@ -120,11 +155,9 @@ def validate_external_database_urls(maas_url, metering_url, ca_file=None):
 
 
 def external_application_url(url_text, ca_configured):
+    """Render the normalized private URI consumed by an application."""
     config = validate_external_database_url(url_text, ca_required=False)
-    query = [(key, value.lower() if key == 'sslmode' else value)
-             for key, value in parse_qsl(urlsplit(url_text).query,
-                                         keep_blank_values=True)
-             if key != 'sslrootcert']
+    query = list(config['query'])
     if ca_configured:
         query.append(('sslrootcert', '/etc/pricetag-external-ca.crt'))
     host = f'[{config["host"]}]' if ':' in config['host'] else config['host']
@@ -135,6 +168,7 @@ def external_application_url(url_text, ca_configured):
 
 
 def external_client_environment(url_text, expected_database, ca_configured):
+    """Render the psql environment for the same target as the application."""
     config = validate_external_database_url(url_text, ca_required=False)
     if config['database'] != expected_database:
         raise ValueError(f'external {expected_database} URL must target the {expected_database} database')
@@ -147,6 +181,7 @@ def external_client_environment(url_text, expected_database, ca_configured):
         'PGUSER': config['username'],
         'PGDATABASE': config['database'],
         'PGSSLMODE': config['sslmode'],
+        'PGCONNECT_TIMEOUT': config['connect_timeout'] or str(EXTERNAL_DATABASE_TIMEOUT),
     }
     if ca_configured:
         values['PGSSLROOTCERT'] = '/etc/pricetag-external-ca.crt'
@@ -154,6 +189,7 @@ def external_client_environment(url_text, expected_database, ca_configured):
 
 
 def external_password_file(password):
+    """Render a private shell fragment containing the database password."""
     if '\x00' in password:
         raise ValueError('external database password must not contain a NUL byte')
     return 'export PGPASSWORD=' + shlex.quote(password) + '\n'
@@ -172,6 +208,7 @@ def gateway_quadlet_body(image, provider_secrets, mount, mock_provider):
 
 
 def main():
+    """Render all private deployment files without starting services."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--providers', type=Path, default=Path('/etc/praxis/shared-gateway.yaml'))
     parser.add_argument('--models', type=Path, default=Path('/etc/praxis/unified-models.json'))

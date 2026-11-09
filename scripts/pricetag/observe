@@ -70,6 +70,7 @@ def command(argv, json_output=False):
 
 
 def sample(prefix):
+    """Collect one timestamped health, service, and database snapshot."""
     memory = {}
     for line in Path('/proc/meminfo').read_text().splitlines():
         name, value = line.split(':', 1)
@@ -114,6 +115,7 @@ def sample(prefix):
 
 
 def main():
+    """Continuously sample deployment health into a private JSONL file."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--samples', type=int, default=1)

@@ -5,6 +5,9 @@ instead connect Praxis MaaS and PriceTag metering to two databases on an
 external PostgreSQL server that you already operate. enMAAS Mini does **not**
 create, provision, upgrade, back up, or manage that server or its databases.
 
+Use PostgreSQL **17.11**. This is the PostgreSQL version used by the bundled
+deployment and is the tested version for external databases.
+
 ## Requirements
 
 Ask your database administrator to create both databases before installation:
@@ -26,7 +29,12 @@ Each URL must:
 - include a host, port, username, password, and database name;
 - target the exact database shown above;
 - set `sslmode=require` or `sslmode=verify-full`;
+- optionally set `connect_timeout` to an integer from 1 through 30 seconds;
 - use a hostname reachable from the deployment host and its Podman network.
+
+Other URI query parameters, including parameters that override the host, role,
+database, or password, are rejected. This ensures startup validation checks
+the same connection that the applications use.
 
 `sslmode=verify-full` is recommended. It also requires a CA file that verifies
 the server certificate and hostname. A CA file is not accepted with
