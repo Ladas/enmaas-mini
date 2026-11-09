@@ -148,6 +148,11 @@ def validate_external_database_urls(maas_url, metering_url, ca_file=None):
         'maas': validate_external_database_url(maas_url, ca_file),
         'metering': validate_external_database_url(metering_url, ca_file),
     }
+    if external_database['maas']['hostaddr'] is not None:
+        raise ValueError('external maas URL must not use hostaddr')
+    for name, config in external_database.items():
+        if config['database'] != name or config['username'] != name:
+            raise ValueError(f'external {name} URL must target the {name} database and use the {name} role')
     if external_database_server(external_database['maas']) != \
             external_database_server(external_database['metering']):
         raise ValueError('external maas and metering URLs must use the same effective database server address and port')

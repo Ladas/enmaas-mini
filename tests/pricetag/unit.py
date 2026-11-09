@@ -255,14 +255,28 @@ class PreparationTest(unittest.TestCase):
         self.assertEqual(environment['PGHOSTADDR'], '10.0.0.8')
 
     def test_external_database_urls_must_use_the_same_effective_server(self):
-        maas = 'postgresql://maas:secret@db.example:5432/maas?sslmode=require&hostaddr=10.0.0.8'
+        maas = 'postgresql://maas:secret@10.0.0.8:5432/maas?sslmode=require'
         metering = 'postgresql://metering:secret@db.example:5432/metering?sslmode=require&hostaddr=10.0.0.9'
+        with self.assertRaisesRegex(ValueError, 'external maas URL must not use hostaddr'):
+            prepare.validate_external_database_urls(
+                maas.replace('10.0.0.8', 'db.example') + '&hostaddr=10.0.0.8', metering)
         with self.assertRaisesRegex(ValueError, 'same effective database server'):
             prepare.validate_external_database_urls(maas, metering)
+        metering_matching = metering.replace('hostaddr=10.0.0.9', 'hostaddr=10.0.0.8')
         matching = prepare.validate_external_database_urls(
-            maas, metering.replace('hostaddr=10.0.0.9', 'hostaddr=10.0.0.8'))
+            maas, metering_matching)
         self.assertEqual(prepare.external_database_server(matching['maas']),
                          prepare.external_database_server(matching['metering']))
+
+    def test_external_database_urls_require_matching_component_targets(self):
+        maas = 'postgresql://maas:secret@db.example:5432/maas?sslmode=require'
+        metering = 'postgresql://metering:secret@db.example:5432/metering?sslmode=require'
+        with self.assertRaisesRegex(ValueError, 'external metering URL must target'):
+            prepare.validate_external_database_urls(
+                maas, metering.replace('/metering?', '/maas?'))
+        with self.assertRaisesRegex(ValueError, 'external metering URL must target'):
+            prepare.validate_external_database_urls(
+                maas, metering.replace('metering:', 'maas:'))
 
     def test_external_application_url_normalizes_sslmode_case(self):
         rendered = prepare.external_application_url(
