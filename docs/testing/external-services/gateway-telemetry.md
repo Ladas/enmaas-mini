@@ -1,8 +1,10 @@
-# Connect gateway metrics and traces
+# Gateway telemetry agent
 
 **Qualification in progress.** The pinned Collector accepts this configuration and its boundary tests pass. Local tests verify real Praxis metrics and fresh traces through the mTLS relay, with authorization/cookie sentinels absent from stored trace details. Four authenticated Perses panels receive finite samples. Mock inference/accounting and telemetry through gateway restarts pass locally; full RHEL installation remains unqualified. A separate restricted systemd sampler collects aggregate host resources; sampling and exact-value transport pass locally, and four host-resource panels passed authenticated browser checks with real Linux samples. The generated timer also passed in the local Podman Linux VM, including systemd credential loading and an enforced negative IP-allowlist test; RHEL execution remains unqualified. Restricted file-log ingestion and the authenticated log table pass locally.
 
 The rootless relay shares the gateway's network namespace. It scrapes the private Praxis admin metrics endpoint and PriceTag metrics, accepts Praxis OTLP on loopback, applies the same attribute restrictions as the receiving collector, and exports over mTLS. Nothing is published from the gateway relay to the host network.
+
+The receiving collector runs on the separate **observability node**. This guide installs the **agent on the gateway node**; both are needed. See [collector placement](topology.md#why-there-are-two-collectors).
 
 ## Prepare on the gateway
 

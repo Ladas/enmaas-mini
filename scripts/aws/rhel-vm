@@ -27,7 +27,7 @@ VLLM_PORT = 8000
 CONFIG_KEYS = {"scenario", "inference", "arch", "instance_type", "volume_gib", "ami_id", "ssh_access", "https_access"}
 READS = {"get-caller-identity", "describe-instance-types", "describe-images", "describe-subnets",
          "describe-route-tables", "describe-instances", "describe-security-groups", "describe-volumes",
-         "describe-key-pairs", "describe-instance-type-offerings"}
+         "describe-key-pairs", "describe-instance-type-offerings", "describe-network-interfaces"}
 WRITES = {"import-key-pair", "create-security-group", "authorize-security-group-ingress", "run-instances"}
 
 
@@ -135,8 +135,20 @@ def update_state(path, state):
 
 
 def tags(prefix, scenario):
-    return [{"Key": "ManagedBy", "Value": MANAGED}, {"Key": "ResourcePrefix", "Value": prefix},
-            {"Key": "Scenario", "Value": scenario}, {"Key": "Name", "Value": prefix}]
+    result = [{"Key": "ManagedBy", "Value": MANAGED}, {"Key": "ResourcePrefix", "Value": prefix},
+              {"Key": "Scenario", "Value": scenario}, {"Key": "Name", "Value": prefix}]
+    # Registry-generated runs share the RDS ownership tag. Legacy journals keep
+    # their original contract; never retroactively adopt or retag resources.
+    match = re.fullmatch(r'(enmaas-[a-f0-9]{16}|em-[a-z][a-z0-9]{0,7}-[a-f0-9]{12})-(gateway|keycloak|observability)', prefix)
+    if match:
+        expected = {'gateway': 'remote-gateway', 'keycloak': 'keycloak', 'observability': 'observability'}
+        if scenario != expected[match[2]]:
+            raise ValueError('deployment role and scenario differ')
+        result += [{"Key": "enmaas:run", "Value": match[1]},
+                   {"Key": "enmaas:purpose", "Value": "external-services-test"}]
+        if match[1].startswith('em-'):
+            result.append({"Key": "enmaas:group", "Value": match[1].split('-')[1]})
+    return result
 
 
 def filters(**values):
@@ -543,7 +555,8 @@ def plan(aws, args):
 
 
 def apply_plan(aws, args, proposal):
-    state = {**proposal, "ClientToken": str(uuid.uuid4()), "ApplyStatus": "started"}
+    state = {**proposal, "ClientToken": str(uuid.uuid4()), "ApplyStatus": "started",
+             "LaunchTagResourceTypes": ["instance", "volume", "network-interface"]}
     save_state(args.state_file, state)
     print("Recovery journal:", args.state_file, flush=True)
     owned = tags(args.prefix, args.scenario)
@@ -565,6 +578,11 @@ def apply_plan(aws, args, proposal):
 def launch_instance(aws, args, proposal, state):
     # Replay identical parameters with the recorded token after an uncertain result.
     owned = tags(args.prefix, args.scenario)
+    # Preserve older journal requests exactly when retrying their client token.
+    # New runs tag the auto-created primary interface at creation, not afterward.
+    tag_types = state.get("LaunchTagResourceTypes", ["instance", "volume"])
+    if tag_types not in (["instance", "volume"], ["instance", "volume", "network-interface"]):
+        raise ValueError("unsupported launch-tag contract in recovery journal")
     try:
         result = aws.call("ec2", "run-instances", image_id=proposal["ImageId"],
             instance_type=proposal["InstanceType"], count=1, client_token=state["ClientToken"], key_name=state["KeyPairName"],
@@ -574,7 +592,7 @@ def launch_instance(aws, args, proposal, state):
             metadata_options={"HttpTokens": "required", "HttpEndpoint": "enabled", "HttpPutResponseHopLimit": 1},
             block_device_mappings=[{"DeviceName": proposal["RootDeviceName"], "Ebs": {
                 "Encrypted": True, "VolumeSize": args.volume_gib, "VolumeType": "gp3", "DeleteOnTermination": True}}],
-            tag_specifications=[{"ResourceType": kind, "Tags": owned} for kind in ["instance", "volume"]])
+            tag_specifications=[{"ResourceType": kind, "Tags": owned} for kind in tag_types])
     except AwsError as error:
         if error.code == "InsufficientInstanceCapacity":
             state["ApplyStatus"] = "capacity-unavailable"

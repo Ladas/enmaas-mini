@@ -28,6 +28,20 @@ benchmark = module('benchmark')
 
 
 class InstallTest(unittest.TestCase):
+    def test_replaceable_mock_profiles_require_explicit_mock_mode(self):
+        base = ['--hostname', 'gateway.example', '--plan']
+        args = installer.parse_args(base + ['--mode', 'mock', '--mock-profiles'])
+        self.assertTrue(args.mock_profiles)
+        self.assertTrue(installer.parse_args(base + ['--mode', 'mock']).mock_profiles)
+        self.assertFalse(installer.parse_args(base + ['--mode', 'mock', '--demo-fixture']).mock_profiles)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            installer.install(args)
+        self.assertIn('OpenAI (mock), External OpenAI/Messages (mock)', output.getvalue())
+        for extra in (['--mock-profiles'], ['--mode', 'mock', '--mock-profiles', '--demo-fixture']):
+            with self.assertRaises(SystemExit):
+                installer.parse_args(base + extra)
+
     def test_explicit_headless_never_prompts_even_with_terminal(self):
         base=['--hostname','gateway.example','--non-interactive','--yes']
         with patch.object(installer.sys.stdin,'isatty',return_value=True), patch('builtins.input',side_effect=AssertionError('unexpected prompt')):
@@ -89,7 +103,7 @@ class InstallTest(unittest.TestCase):
                               installer.PUBLISHED_METERING_IMAGE):
                     self.assertEqual(text.count(image), 1)
                 self.assertNotIn('  Mode ', text)
-                self.assertIn('Mock providers (benchmark)' if mode == 'mock' else
+                self.assertIn('OpenAI (mock), External OpenAI/Messages (mock)' if mode == 'mock' else
                               'OpenAI, External (OpenAI-compatible + Anthropic Messages)', text)
 
     def test_sample_users_can_be_omitted_without_omitting_admin(self):

@@ -1,5 +1,6 @@
 """Validate opt-in external OIDC configuration without logging credential values."""
 import json
+import ipaddress
 import os
 from pathlib import Path
 import re
@@ -23,8 +24,27 @@ def https_url(value,origin=False):
     return value.rstrip('/')
 
 
+def private_issuer_host(issuer, address):
+    """Pin only the issuer DNS name to a private address; preserve HTTPS identity."""
+    name=urlsplit(https_url(issuer)).hostname
+    if (len(name)>253 or '.' not in name or any(
+            not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?',label)
+            for label in name.split('.'))):
+        raise ValueError('private issuer resolution requires an explicit DNS hostname')
+    try:ipaddress.ip_address(name)
+    except ValueError:pass
+    else:raise ValueError('private issuer resolution requires DNS, not an IP issuer URL')
+    if not isinstance(address,str):raise ValueError('private issuer address must be RFC1918 IPv4')
+    try:private=ipaddress.IPv4Address(address)
+    except (ValueError,TypeError):raise ValueError('private issuer address must be RFC1918 IPv4') from None
+    if not any(private in ipaddress.IPv4Network(network) for network in
+               ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16')):
+        raise ValueError('private issuer address must be RFC1918 IPv4')
+    return name+':'+str(private)
+
+
 def load(path,public_origin):
-    """Return environment settings and optional CA path; disabled unless called."""
+    """Return environment settings, optional CA path and private host mapping; disabled unless called."""
     path=Path(path)
     if not path.is_absolute(): raise ValueError('OIDC input path must be absolute')
     try:
@@ -39,9 +59,10 @@ def load(path,public_origin):
     if len(content)>65536: raise ValueError('OIDC input is too large')
     try: config=json.loads(content)
     except (ValueError,UnicodeError): raise ValueError('OIDC input must be valid JSON') from None
-    if not isinstance(config,dict) or set(config)-{'issuer_url','client_id','client_secret','ca_file'}:
+    if not isinstance(config,dict) or set(config)-{'issuer_url','client_id','client_secret','ca_file','issuer_private_ip'}:
         raise ValueError('unsupported OIDC configuration fields')
     issuer=https_url(config.get('issuer_url'))
+    mapping=private_issuer_host(issuer,config['issuer_private_ip']) if 'issuer_private_ip' in config else None
     origin=https_url(public_origin,origin=True)
     client=config.get('client_id')
     if not isinstance(client,str) or not re.fullmatch(r'[A-Za-z0-9._:-]{1,128}',client):
@@ -67,4 +88,4 @@ def load(path,public_origin):
         try: ssl.create_default_context(cafile=str(ca))
         except (OSError,ssl.SSLError): raise ValueError('OIDC CA could not be loaded') from None
         env['SSL_CERT_FILE']='/etc/pricetag-oidc-ca.pem'
-    return env,ca
+    return env,ca,mapping

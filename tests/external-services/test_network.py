@@ -38,6 +38,19 @@ class Network(unittest.TestCase):
             if change=='duplicate':hosts['keycloak']['PublicIpAddress']=hosts['gateway']['PublicIpAddress']
             with self.assertRaises(ValueError):network.peer_rules(hosts)
 
+    def test_private_issuer_uses_only_exact_peer_security_groups(self):
+        plan=network.peer_rules(self.hosts(),issuer_path='private')
+        issuer=[r['permission'] for r in plan if r['target']=='keycloak']
+        self.assertEqual({r['UserIdGroupPairs'][0]['GroupId'] for r in issuer},
+                         {'sg-gateway','sg-observability'})
+        self.assertTrue(all(r['FromPort']==8443 and r['ToPort']==8443 for r in issuer))
+        self.assertTrue(all('IpRanges' not in r for r in issuer))
+        for address in ('198.51.100.10','127.0.0.1','169.254.1.1','0.0.0.0'):
+            hosts=self.hosts();hosts['gateway']['PrivateIpAddress']=address
+            with self.subTest(address=address),self.assertRaises(ValueError):
+                network.peer_rules(hosts,issuer_path='private')
+        with self.assertRaises(ValueError):network.peer_rules(self.hosts(),issuer_path='unknown')
+
     def test_normalization_ignores_description_not_broader_access(self):
         rule={'IpProtocol':'tcp','FromPort':24443,'ToPort':24443,
               'UserIdGroupPairs':[{'GroupId':'sg-gateway','Description':'lab','UserId':'account'}]}
@@ -75,6 +88,16 @@ class Network(unittest.TestCase):
             _,missing=network.inspect(aws,args)
             self.assertEqual(len(missing),3)
             for rule in missing:groups[rule['group_id']]['IpPermissions'].append(rule['permission'])
+            self.assertEqual(network.inspect(aws,args)[1],[])
+            args.issuer_path='private'
+            with self.assertRaisesRegex(ValueError,'Unexpected ingress'):
+                network.inspect(aws,args)  # Never silently retain the public-IP peer path.
+            groups['sg-keycloak']['IpPermissions']=list(baseline)
+            _,private_missing=network.inspect(aws,args)
+            self.assertEqual(len(private_missing),2)
+            for rule in private_missing:
+                self.assertIn('UserIdGroupPairs',rule['permission'])
+                groups[rule['group_id']]['IpPermissions'].append(rule['permission'])
             self.assertEqual(network.inspect(aws,args)[1],[])
             groups['sg-keycloak']['IpPermissions'].append({'IpProtocol':'-1','IpRanges':[{'CidrIp':'0.0.0.0/0'}]})
             with self.assertRaisesRegex(ValueError,'Unexpected ingress'):network.inspect(aws,args)

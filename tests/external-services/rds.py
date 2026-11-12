@@ -29,6 +29,9 @@ def build_plan(*,account,region,prefix,vpc,subnets,gateway_group,engine_version,
         if not re.fullmatch(r'subnet-[a-f0-9]{8,17}',subnet['SubnetId']):raise ValueError('Invalid subnet ID')
     name=prefix+'-postgres'
     tags=[{'Key':'enmaas:run','Value':prefix},{'Key':'enmaas:purpose','Value':'external-services-test'}]
+    group = re.fullmatch(r'em-([a-z][a-z0-9]{0,7})-[a-f0-9]{12}', prefix)
+    if group:
+        tags.append({'Key':'enmaas:group','Value':group[1]})
     return {'AccountId':account,'Region':region,'VpcId':vpc,'Prefix':prefix,
         'SubnetGroup':{'DBSubnetGroupName':name,'DBSubnetGroupDescription':'enMAAS private test PostgreSQL',
                        'SubnetIds':[s['SubnetId'] for s in subnets],'Tags':tags},
@@ -54,7 +57,9 @@ class ReadOnlyAws:
     allowed={('sts','get-caller-identity'),('ec2','describe-instances'),('ec2','describe-security-groups'),
              ('ec2','describe-subnets'),('ec2','describe-vpc-attribute'),
              ('rds','describe-db-engine-versions'),('rds','describe-orderable-db-instance-options'),
-             ('rds','describe-db-instances'),('rds','describe-db-parameters')}
+             ('rds','describe-db-instances'),('rds','describe-db-parameters'),
+             ('rds','describe-db-parameter-groups'),('rds','list-tags-for-resource'),
+             ('rds','describe-db-snapshots'),('rds','describe-db-instance-automated-backups')}
 
     def __init__(self,region,profile=None):self.region=region;self.profile=profile
 
@@ -148,6 +153,7 @@ def create(aws,plan,path):
         operation('Instance','rds','create-db-instance',{
             **plan['Instance'],'VpcSecurityGroupIds':[group]},lambda r:{
                 'Identifier':r['DBInstance']['DBInstanceIdentifier'],'Arn':r['DBInstance']['DBInstanceArn'],
+                'ResourceId':r['DBInstance']['DbiResourceId'],
                 'MasterSecretArn':r['DBInstance'].get('MasterUserSecret',{}).get('SecretArn')})
         state['Created']=True;save()
         return state
@@ -163,6 +169,9 @@ def verify(aws,state,account,region):
     if len(result)!=1:raise ValueError('RDS instance missing')
     db=result[0];expected=plan['Instance']
     if db['DBInstanceArn']!=state['Resources']['Instance']['Arn']:raise ValueError('RDS resource identity differs')
+    resource_id=state['Resources']['Instance'].get('ResourceId')
+    if not resource_id or db.get('DbiResourceId')!=resource_id:
+        raise ValueError('RDS immutable resource ID missing or changed; manual journal reconciliation required')
     for field in ('Engine','EngineVersion','DBInstanceClass','StorageEncrypted','PubliclyAccessible','DeletionProtection','BackupRetentionPeriod','MultiAZ','AutoMinorVersionUpgrade'):
         if db.get(field)!=expected[field]:raise ValueError('RDS setting differs: '+field)
     if (db.get('StorageType')!=expected['StorageType'] or db.get('MaxAllocatedStorage')!=expected['MaxAllocatedStorage']
@@ -182,15 +191,30 @@ def verify(aws,state,account,region):
     network=importlib.util.module_from_spec(spec);spec.loader.exec_module(network)
     if network.ruleset(groups[0].get('IpPermissions',[]))!=network.ruleset([plan['Ingress']]):
         raise ValueError('RDS ingress differs from gateway-only policy')
-    if {t['Key']:t['Value'] for t in groups[0].get('Tags',[])}.get('enmaas:run')!=plan['Prefix']:
+    expected_tags={tag['Key']:tag['Value'] for tag in expected['Tags']}
+    group_tags={tag['Key']:tag['Value'] for tag in groups[0].get('Tags',[])}
+    if any(group_tags.get(key)!=value for key,value in expected_tags.items()):
         raise ValueError('RDS security-group ownership tag differs')
-    if not db.get('MasterUserSecret',{}).get('SecretArn'):raise ValueError('Managed master credential missing')
+    secret=db.get('MasterUserSecret',{}).get('SecretArn')
+    if not secret or secret!=state['Resources']['Instance'].get('MasterSecretArn'):
+        raise ValueError('Managed master credential identity differs from the journal')
+    if db['DBSubnetGroup'].get('DBSubnetGroupArn')!=state['Resources'].get('SubnetGroup'):
+        raise ValueError('Subnet group identity differs from the journal')
     parameters=db.get('DBParameterGroups',[])
     if len(parameters)!=1 or parameters[0]['DBParameterGroupName']!=expected['DBParameterGroupName']:
         raise ValueError('RDS parameter group differs')
     values=aws.call('rds','describe-db-parameters',db_parameter_group_name=expected['DBParameterGroupName'])['Parameters']
     if not any(p['ParameterName']=='rds.force_ssl' and p.get('ParameterValue')=='1' for p in values):
         raise ValueError('RDS TLS enforcement differs')
+    parameter_groups=aws.call('rds','describe-db-parameter-groups',
+                              db_parameter_group_name=expected['DBParameterGroupName'])['DBParameterGroups']
+    if (len(parameter_groups)!=1 or not state['Resources'].get('ParameterGroup')
+            or parameter_groups[0].get('DBParameterGroupArn')!=state['Resources']['ParameterGroup']):
+        raise ValueError('Parameter group identity differs from the journal')
+    for arn in (db['DBInstanceArn'],state['Resources']['SubnetGroup'],state['Resources']['ParameterGroup']):
+        actual={tag['Key']:tag['Value'] for tag in aws.call('rds','list-tags-for-resource',resource_name=arn)['TagList']}
+        if any(actual.get(key)!=value for key,value in expected_tags.items()):
+            raise ValueError('RDS dependency ownership tags differ')
     ready=(db['DBInstanceStatus']=='available' and parameters[0]['ParameterApplyStatus']=='in-sync'
            and db['MasterUserSecret'].get('SecretStatus')=='active')
     return {'Ready':ready,'State':db['DBInstanceStatus'],'Endpoint':db.get('Endpoint',{}).get('Address'),

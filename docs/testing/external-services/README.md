@@ -1,53 +1,56 @@
-# External services test lab
+# Full-deployment testing
 
-**Qualification in progress.** Start with [local Podman tests](local-podman.md). They exercise gateway identity/session boundaries and real metrics/trace delivery; short mock inference/accounting phases also pass locally. Sustained qualification, three-host RHEL installation and RDS acceptance remain pending. Use mocked providers and disposable infrastructure.
+This guide tests the [full deployment layout](../../quickstarts/remote-gateway-pricetag/full-deployment.md)
+using mock providers. AWS infrastructure, auxiliary service fixtures and
+benchmarks are testing tools; the full deployment itself is not a test-only layout.
 
-| Operation | Instructions | Qualification |
+**Qualification in progress.** Start with [local Podman tests](local-podman.md). They exercise gateway identity/session boundaries, metrics/trace delivery and six ten-minute mock traffic phases with accounting reconciliation. Three-host RHEL installation, capacity and RDS acceptance remain pending. Use mocked providers and disposable infrastructure.
+
+## Choose a workflow
+
+| Workflow | Start here | Outcome |
 | --- | --- | --- |
-| Run without menus | [Headless installation](headless.md) | Explicit choices, protected credential files; fresh RHEL acceptance pending |
-| Prepare private TLS bundles | [Certificates](certificates.md) | Generated certificates and rejection tests run locally |
-| Install Keycloak | [Keycloak host](keycloak-rhel.md) | Generated rootless systemd units and browser logins tested in the local Linux VM; full RHEL installer pending |
-| Install observability | [Observability host](observability-rhel.md) | Quadlet generation, collector configuration and synthetic redaction tested; full host installation pending |
-| Connect gateway telemetry | [Gateway relay](gateway-telemetry.md) | Gateway metrics, traces, restricted container logs and host-resource panels pass locally; RHEL relay execution remains pending |
-| Connect gateway SSO | [OIDC and identities](oidc.md) | Gateway login, unknown identity denial, session deactivation and shared issuer login tested locally; current-role checks and shared logout pass with a pending PriceTag CSP fix; observability group removal revokes an existing session within the tested refresh window; synchronization into PriceTag roles is not implemented |
-| Run traffic phases | [Benchmark](benchmark.md) | Short six-phase local run passes per-user event/token/USD reconciliation and cleanup; sustained/RHEL runs pending |
-| Inspect benchmark evidence | [Offline report](report.md) | CPU/memory chart and phase table generated from actual local samples |
-| Plan optional RDS | [RDS design and pending work](rds.md) | Plan/apply/recovery and verifier tests use simulated AWS; real deployment pending |
-| Remove lab resources | [Cleanup](cleanup.md) | Explicit resource inventory; no automatic deletion |
+| Understand the nodes | [Topology and collector placement](topology.md) | Component ownership and data flow |
+| Run locally | [Local Podman setup](local-podman.md) → [dashboard access](local-dashboards.md) | Full application stack with mocked LLMs; no AWS required |
+| Deploy on AWS/RHEL | [AWS provisioning](aws.md) → [headless installation](headless.md) | Three separate hosts; optional RDS |
+| Verify security | [Security acceptance](security-acceptance.md) | Tested boundaries, pending checks and evidence requirements |
+| Generate and inspect traffic | [Benchmark](benchmark.md) → [report](report.md) | Six phases, accounting reconciliation and resource graphs |
+| Remove resources | [Cleanup](cleanup.md) | Inventory and ordered manual teardown |
 
-This lab uses three RHEL VMs: gateway, observability and Keycloak. The normal gateway installer accepts protected TLS and OIDC configuration. A separate lab helper connects gateway telemetry; auxiliary installers belong under `tests/external-services`, not the production quickstart. Optional RDS is a separate provisioning step.
+## Configure each component
+
+| Component | Guides |
+| --- | --- |
+| Shared trust and connectivity | [Certificates](certificates.md), [peer network rules](network.md) |
+| Identity node | [Keycloak installation](keycloak-rhel.md), [gateway OIDC and identity mapping](oidc.md) |
+| Observability node | [Receiver, stores and Perses](observability-rhel.md) |
+| Gateway node | [Headless application installer](headless.md), [local collector agent and host sampler](gateway-telemetry.md) |
+| Providers and model selection | [Mock profiles and real-provider replacement](providers.md) |
+| External database | [Optional private RDS](rds.md) |
+| Script entry points and tests | [Categorized script index](../../../tests/external-services/README.md) |
+
+Auxiliary installers live under `tests/external-services`. The normal gateway installer consumes protected external-service configuration; it does not provision AWS or install the auxiliary nodes. All scripts accept explicit inputs; AWS billable operations retain separate administrator confirmation.
 
 ## Provision the three VMs
 
-On the AWS administrator workstation, enter the reviewed repository and reuse the [AWS credential/session setup](../aws-pricetag.md). Keep AWS credentials on this workstation.
+Already have fresh RHEL hosts? Skip AWS and follow [headless installation](headless.md).
+Otherwise use the separate [AWS three-node infrastructure guide](aws.md). It covers
+account discovery, deployment manifests, launch summaries and recovery journals.
+The [one-node AWS guide](../aws-pricetag.md) is unchanged.
 
-```console
-source scripts/aws/session.sh
-aws_test_credentials
-REGION=eu-central-1
-SUBNET=''
-CLIENT_CIDR=''
-RUN_PREFIX="enmaas-lab-$(python3 -c 'import uuid; print(uuid.uuid4().hex[:8])')"
-SSH_KEY="$HOME/.secure-single-server-tests/ssh/$RUN_PREFIX"
-aws_test_discover
-aws_test_key
-ssh-add "$SSH_KEY"
-source tests/external-services/aws-lab.sh
-aws_lab_plan
-```
+The current AWS helper requires an approved subnet. Dedicated-VPC provisioning,
+complete scoped-role bootstrap and automated deletion are still pending.
 
-Review all plans, then run:
+## Interactive or headless installation
 
-```console
-aws_lab_deploy
-aws_lab_info
-```
+| Deployment | Interactive | Headless |
+| --- | --- | --- |
+| One node, no SSO/observability | [Main quickstart](../../quickstarts/remote-gateway-pricetag/README.md) | [Installation modes](../../quickstarts/remote-gateway-pricetag/deployment-options.md#one-node-headless) |
+| Full lab | Prepare issuer, certificates and observability first; the gateway installer can prompt for provider/user choices | [Full lab installation](headless.md): all service installers accept explicit inputs |
 
-Each VM still requires its own typed billable-launch confirmation. `aws_lab_info` waits for running instances and exports and prints each role’s SSH target, public IP and private IP for the following steps. It does not verify service readiness. Defaults: gateway 32 GiB/150 GiB disk, observability 16 GiB/100 GiB, Keycloak 8 GiB/50 GiB. These are test starting points, not measured capacity claims. All use amd64; no GPU or local LLM is required.
-
-**Partial launch:** inspect `.state/$RUN_PREFIX-ROLE.json`. Resume only the failed role with `aws_test_deploy ROLE tests/external-services/ROLE-vm.json --scenario SCENARIO`; gateway uses `remote-gateway`, others use their role. Do not rerun the full batch after a partial failure. The existing helper retains journals and never deletes resources automatically.
-
-Only SSH and browser HTTPS (8443) from the workstation `/32` are initially allowed. Add only the [reviewed peer rules](network.md); do not open raw database, Prometheus, Loki, Tempo or collector ports publicly. See [design and acceptance](design.md) and [manual AWS cleanup](cleanup.md).
+There is no combined interactive wizard for all three nodes. Auxiliary service
+installers are command-driven. The full lab uses the source-pinned PriceTag build
+for its qualified local SSO lifecycle; published mode is not qualified for that flow.
 
 ## Implementation and validation order
 

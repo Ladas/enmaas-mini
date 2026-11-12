@@ -28,6 +28,20 @@ The output directory must not exist. Server and telemetry-client certificates ex
 
 Distinct keys identify each host. A server certificate cannot authenticate as a telemetry client. Each certificate includes its configured IP addresses and loopback names for local readiness checks.
 
+## Optional DNS identities — preparation only
+
+The certificate generator accepts `--gateway-name`, `--keycloak-name` and
+`--observability-name` to add an exact DNS SAN to the corresponding server
+certificate. Existing IP SANs remain. For example, add
+`--keycloak-name identity.lab.example.com` to the generation command only after
+choosing a name you control. Wildcards, URLs and unvalidated SAN strings are refused.
+
+This creates certificate material only: it does not create DNS records, change
+issuer URLs or configure private resolution. For the optional hostname issuer flow, follow [private issuer resolution](oidc.md#private-issuer-resolution). Do not switch clients
+until the issuer, callbacks and private backchannels have been configured and
+tested together. Three-host RHEL qualification remains pending. An added DNS SAN does not make a private CA
+publicly trusted. Existing bundles are never overwritten.
+
 ## Transfer one role bundle
 
 Use the matching verified SSH host and SSH key. Check the host fingerprint before the first connection. This example transfers the gateway bundle; repeat with `keycloak` and `observability` and their corresponding host variables.

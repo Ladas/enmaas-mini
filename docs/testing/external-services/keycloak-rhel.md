@@ -28,6 +28,10 @@ The generator creates a dedicated realm, immutable UUIDs for three test users, s
 
 Supply a matching server certificate/key and public issuer CA, owned by root with mode `0600`. The server certificate must cover the issuer IP and `localhost` (the loopback administration endpoint). Generate/sign certificates on the workstation: do not copy the CA signing key to this VM.
 
+For a DNS issuer with private peer connections, follow the optional
+[private issuer resolution](oidc.md#private-issuer-resolution)
+configuration before generating inputs. Keep both clients on the same issuer name.
+
 ## Install
 
 Run from the repository on the issuer host. List narrow source networks for the workstation and the two peer VMs; use the addresses actually seen by the host firewall.
@@ -103,3 +107,49 @@ python3 tests/external-services/keycloak-boundary.py \
 For local ARM testing, use a native Praxis image with the same verified source revision; an AMD64 image under emulation failed upstream connections with an unsupported socket option. Do not treat an emulated-image failure as a RHEL result.
 
 Before RHEL acceptance, verify certificate/SAN checks, exact issuer discovery, public admin and master-realm denial (including encoded/normalized paths), all persona logins, restricted peer access, reboot recovery and secret/certificate rotation. The local shared-pod tests do not replace these checks.
+
+## Existing firewall configuration
+
+Before creating service secrets, the installer audits runtime and permanent
+firewalld rules. It repeats the audit before starting services. Extra ports,
+services, unreviewed policies, direct rules and broader rich rules stop the
+installation. Existing rules are never removed automatically. The standard
+IPv6 host policy is accepted only with its reviewed ICMPv6 behavior; SSH and
+DHCPv6 service definitions are checked rather than trusted by name.
+
+If the audit stops, review the named configuration on the dedicated VM before
+retrying. Do not disable firewalld or remove the IPv6 policy to bypass the check.
+This audit does not cover independently installed nftables rules or replace AWS
+security-group checks and external packet-level deny probes. Its live RHEL
+qualification is still pending.
+
+## Login abuse protection
+
+Newly generated realms disable self-registration and password-reset flows and
+configure temporary brute-force lockout: five failed logins, a 60-second wait
+increment and a 15-minute maximum wait. Quick repeated failures can also trigger
+a temporary wait. Existing imported realms are not updated by regenerating files;
+realm import does not provide an upgrade mechanism.
+
+The pinned image passed isolated login-form tests for valid credentials, wrong
+passwords, temporary lockout and recovery. Repeat these checks against the
+PostgreSQL-backed RHEL issuer and test concurrent attempts before public access. Account-level lockout
+can itself be abused to deny someone access; it complements request limits and
+administrator MFA rather than replacing them. Administrator MFA enrollment remains
+a public-access prerequisite to design and qualify.
+
+See [Keycloak brute-force protection](https://www.keycloak.org/docs/26.8.0/server_admin/#password-guess-brute-force-attacks).
+
+Run the isolated local lockout test with Podman:
+
+```sh
+python3 tests/external-services/issuer-lockout.py
+```
+
+It generates a separate realm and TLS material, publishes only a random loopback
+port, checks login/failure/lockout/recovery, then removes its container and secrets.
+It does not modify the running demo or use its credentials. Allow roughly two
+minutes; the test waits for the actual lockout period rather than shortening the
+configured policy. This local fixture uses the pinned Keycloak image with its
+embedded development database; RHEL's PostgreSQL-backed issuer remains a separate
+qualification target.

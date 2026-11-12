@@ -5,13 +5,60 @@ from pathlib import Path
 import tempfile
 from unittest.mock import patch, Mock
 import json
+import ssl
+import urllib.error
 import unittest
+import yaml
 
 spec = importlib.util.spec_from_file_location('local_lab', Path(__file__).with_name('local.py'))
 lab = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(lab)
 
 class LocalLab(unittest.TestCase):
+    def test_client_certificate_probe_requires_tls_rejection(self):
+        request = Mock(); context = Mock()
+        for error in (ssl.SSLError('certificate required'),
+                      urllib.error.URLError(ssl.SSLError('certificate required'))):
+            with patch.object(lab.urllib.request, 'urlopen', side_effect=error):
+                lab.require_tls_rejection(request, context)
+        for error in (urllib.error.URLError(TimeoutError()),
+                      urllib.error.HTTPError('https://localhost',403,'forbidden',{},None),
+                      ConnectionRefusedError()):
+            with self.subTest(error=type(error).__name__), patch.object(lab.urllib.request,'urlopen',side_effect=error):
+                with self.assertRaises(RuntimeError):lab.require_tls_rejection(request, context)
+        with patch.object(lab.urllib.request,'urlopen') as opened:
+            with self.assertRaises(RuntimeError):lab.require_tls_rejection(request, context)
+            opened.return_value.close.assert_called_once()
+
+    def test_all_local_signal_pipelines_apply_full_privacy_transform(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            lab.configure(root, certificates=False)
+            config = yaml.safe_load((root/'collector.yaml').read_text())
+            self.assertEqual(config['receivers']['otlp']['protocols']['http']['max_request_body_size'],4194304)
+            self.assertEqual(config['processors']['batch']['send_batch_max_size'],512)
+            for signal in ('logs', 'traces', 'metrics'):
+                self.assertEqual(config['service']['pipelines'][signal]['processors'],
+                                 ['memory_limiter', 'transform', 'batch'])
+            transform = config['processors']['transform']
+            self.assertIn('set(body, "gateway event")', str(transform))
+            self.assertIn('set(links, nil)', str(transform))
+            self.assertIn('metric_statements', transform)
+            self.assertEqual(transform['error_mode'], 'propagate')
+
+    def test_issuer_disables_self_registration_and_enables_temporary_lockout(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            lab.configure(root, certificates=False)
+            realm = json.loads((root/'realm.json').read_text())
+            self.assertFalse(realm['registrationAllowed'])
+            self.assertFalse(realm['resetPasswordAllowed'])
+            self.assertTrue(realm['bruteForceProtected'])
+            self.assertFalse(realm['permanentLockout'])
+            self.assertEqual(realm['failureFactor'], 5)
+            self.assertGreaterEqual(realm['waitIncrementSeconds'], 60)
+            self.assertGreater(realm['maxDeltaTimeSeconds'], realm['maxFailureWaitSeconds'])
+
     def test_gateway_oidc_uses_immutable_subject_and_separate_client(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
@@ -109,7 +156,7 @@ class LocalLab(unittest.TestCase):
             self.assertIn('client_ca_file: /lab/ca.pem', collector)
             self.assertIn('endpoint: 0.0.0.0:24443', collector)
             self.assertIn('memory_limiter', collector)
-            self.assertIn('delete_key(attributes, "authorization")', collector)
+            self.assertEqual(yaml.safe_load(collector)['processors']['transform'], lab.privacy_transform())
 
     def test_repeat_configuration_does_not_rotate_credentials(self):
         with tempfile.TemporaryDirectory() as d:

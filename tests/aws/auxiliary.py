@@ -12,6 +12,25 @@ vm = importlib.util.module_from_spec(spec)
 loader.exec_module(vm)
 
 class Auxiliary(unittest.TestCase):
+    def test_registry_runs_share_ownership_tag_without_weakening_role_tags(self):
+        run = 'enmaas-0123456789abcdef'
+        for role, scenario in (('gateway', 'remote-gateway'), ('keycloak', 'keycloak'),
+                               ('observability', 'observability')):
+            prefix = run+'-'+role
+            tags = vm.tags(prefix, scenario)
+            mapped = {item['Key']: item['Value'] for item in tags}
+            self.assertEqual(mapped['enmaas:run'], run)
+            self.assertEqual(mapped['enmaas:purpose'], 'external-services-test')
+            self.assertTrue(vm.owned_tags({'Tags': tags}, prefix, scenario))
+            changed = [dict(item, Value='foreign') if item['Key']=='enmaas:run' else item for item in tags]
+            self.assertFalse(vm.owned_tags({'Tags': changed}, prefix, scenario))
+            missing = [item for item in tags if item['Key']!='enmaas:run']
+            self.assertFalse(vm.owned_tags({'Tags': missing}, prefix, scenario))
+        with self.assertRaises(ValueError):
+            vm.tags(run+'-gateway', 'keycloak')
+        self.assertNotIn('enmaas:run', {item['Key'] for item in vm.tags('legacy-gateway', 'remote-gateway')})
+
+
     def test_sizing_is_role_specific(self):
         for role, memory in [('keycloak', 8192), ('observability', 16384)]:
             machine = {'MemoryInfo': {'SizeInMiB': memory},

@@ -27,11 +27,43 @@ The issuer uses the same public-IP URL for browsers and both clients. Security-g
 
 No SSH, database, raw query or administrator port is added. The original workstation SSH/HTTPS rules remain. Unexpected ingress causes refusal rather than automatic removal. If an instance is replaced or its public address changes, review and remove obsolete peer rules explicitly before rerunning.
 
+## DNS issuer with private peer traffic
+
+Use this mode with [private issuer resolution](oidc.md#private-issuer-resolution).
+Both clients must resolve the canonical issuer DNS name to the Keycloak private IP;
+its certificate must cover that name. The helper only grants network access: it
+does not configure DNS, certificates or client mappings.
+
+```sh
+python3 tests/external-services/network.py \
+  --account-id "$ACCOUNT_ID" --region "$REGION" --prefix "$RUN_PREFIX" \
+  --issuer-path private
+```
+
+After reviewing the plan, apply with the same mode:
+
+```sh
+python3 tests/external-services/network.py \
+  --account-id "$ACCOUNT_ID" --region "$REGION" --prefix "$RUN_PREFIX" \
+  --issuer-path private --apply
+```
+
+Keycloak TCP 8443 accepts the **gateway and observability security groups** over
+their private-IP paths. Workstation browser access stays restricted to the
+original source `/32`; telemetry rules are unchanged. The plan prints the selected
+issuer path and destination address. All three private addresses must be RFC1918.
+
+Use this mode consistently for later inspections. Existing public-IP peer grants
+are rejected as unexpected ingress; an administrator must review and remove those
+exact obsolete grants before switching. The helper never widens or deletes rules
+automatically. This path is unit-tested, but not yet qualified against live AWS.
+
 ## Host firewall
 
 Security groups and host firewalls must agree:
 
 - Keycloak installer: workstation `/32`, gateway public `/32`, observability public `/32` for 8443.
+- With `--issuer-path private`: replace the two peer sources above with their **private `/32`** addresses; keep the workstation source unchanged.
 - Observability installer: workstation `/32` for browser 8443; gateway **private** `/32` for telemetry 24443.
 - No broad subnet or public collector grant is needed.
 

@@ -20,13 +20,28 @@ class OIDC(unittest.TestCase):
     def test_secure_defaults_and_exact_callback(self):
         with tempfile.TemporaryDirectory() as d:
             path=Path(d)/'oidc.json';self.config(path)
-            env,ca=oidc_config.load(path,'https://gateway.example:8443')
+            env,ca,mapping=oidc_config.load(path,'https://gateway.example:8443')
             self.assertEqual(env['OIDC_REDIRECT_URL'],'https://gateway.example:8443/oauth/callback')
             self.assertEqual(env['OIDC_POST_LOGOUT_REDIRECT_URL'],'https://gateway.example:8443/login')
             for key in ('OIDC_DEVELOPMENT_MODE','OIDC_TEST_LOGIN','OIDC_CLAIMS_DEBUG'):
                 self.assertEqual(env[key],'false')
             self.assertEqual(env['OIDC_SCOPES'], 'openid profile email')
             self.assertIsNone(ca)
+            self.assertIsNone(mapping)
+    def test_private_issuer_mapping_preserves_identity_and_tls(self):
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'oidc.json';self.config(path,issuer_private_ip='10.0.0.11')
+            env,ca,mapping=oidc_config.load(path,'https://gateway.example:8443')
+            self.assertEqual(mapping,'issuer.example:10.0.0.11')
+            self.assertEqual(env['OIDC_ISSUER_URL'],'https://issuer.example/realms/lab')
+            self.assertEqual(env['OIDC_DEVELOPMENT_MODE'],'false')
+            self.assertNotIn('10.0.0.11',str(env))
+            for address in ('127.0.0.1','0.0.0.0','169.254.1.2','8.8.8.8','10.0.0.1\nInjected=yes'):
+                self.config(path,issuer_private_ip=address)
+                with self.assertRaises(ValueError):oidc_config.load(path,'https://gateway.example:8443')
+            self.config(path,issuer_url='https://192.0.2.1/realm',issuer_private_ip='10.0.0.11')
+            with self.assertRaises(ValueError):oidc_config.load(path,'https://gateway.example:8443')
+
     def test_unsafe_values_never_echo_secrets(self):
         with tempfile.TemporaryDirectory() as d:
             path=Path(d)/'oidc.json'

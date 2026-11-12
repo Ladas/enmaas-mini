@@ -39,7 +39,7 @@ def maas_environment():
         'METRICS_SECURE':'false','METRICS_ADDRESS':'127.0.0.1:9909'}
 
 
-def run_mock_dependencies(maas):
+def run_mock_dependencies(maas, profiles=False):
     common=['--detach','--pod',lab.POD,'--label',lab.LABEL,'--read-only',
         '--cap-drop','ALL','--security-opt','no-new-privileges',
         '--pids-limit','256','--memory','512m','--tmpfs','/tmp:rw,noexec,nosuid,size=16m']
@@ -50,10 +50,11 @@ def run_mock_dependencies(maas):
     run('run',*common,'--name',lab.POD+'-provider',
         '--secret',lab.secret_name('gateway-provider')+',target=/fixtures/provider.py,mode=0444',
         '--secret',lab.secret_name('gateway-provider-start')+',target=/fixture-start.py,mode=0444',
+        *(['--env', 'MOCK_PROFILES=1', '--secret', lab.secret_name('mock-profiles')+',target=/fixtures/mock-profiles.json,mode=0444'] if profiles else []),
         prepare.PYTHON,'python3','-B','/fixture-start.py')
 
 
-def start(metering,praxis,maas=None):
+def start(metering,praxis,maas=None,profiles=False):
     metadata=json.loads(run('pod','inspect',lab.POD))[0]
     if metadata.get('Labels',{}).get('io.enmaas.test-lab')!=lab.INSTANCE:
         raise ValueError('Local lab ownership label differs')
@@ -68,7 +69,8 @@ def start(metering,praxis,maas=None):
         raise ValueError('Existing SSO test inputs; inspect and clean the dedicated fixture before retrying')
     credentials=json.loads((lab.STATE/'credentials.json').read_text())
     m2m=secrets.token_hex(32);partner=secrets.token_hex(32)
-    env,_=oidc_config.load(lab.STATE/'gateway-oidc.json','https://localhost:28443')
+    env,_,mapping=oidc_config.load(lab.STATE/'gateway-oidc.json','https://localhost:28443')
+    if mapping is not None:raise ValueError('shared-pod fixture does not support private issuer mappings')
     env.update(DATABASE_URL=f"postgres://keycloak:{credentials['db']}@localhost:5432/metering_sso?sslmode=disable",
         PORT='8087',METRICS_PORT='9908',M2M_AUTH_REQUIRED='true',M2M_SHARED_SECRET=m2m,
         MANAGEMENT_API_SECRET=secrets.token_hex(32),MANAGEMENT_PUBLIC_ORIGIN='https://localhost:28443',PARTNER_USER_KEY_GROUP='system:authenticated',
@@ -80,7 +82,18 @@ def start(metering,praxis,maas=None):
     lab.write(lab.STATE,'gateway-sso.env',''.join(f'{key}={value}\n' for key,value in env.items()))
     lab.write(lab.STATE,'gateway-sso-partner',partner)
     lab.write(lab.STATE,'gateway-sso-m2m',m2m)
-    original,models=prepare.mock_inputs()
+    if profiles:
+        from mock_profiles import configuration
+        from demo_config import native_inputs
+        document=configuration()
+        original,models=native_inputs(document),document['models']
+        lab.write(lab.STATE,'mock-profiles.json',document)
+        secret('mock-profiles',lab.STATE/'mock-profiles.json')
+        for name,key in [('openai','synthetic-openai'),('external','synthetic-anthropic')]:
+            lab.write(lab.STATE,'mock-key-'+name,key)
+            secret('mock-key-'+name,lab.STATE/('mock-key-'+name))
+    else:
+        original,models=prepare.mock_inputs()
     config=prepare.render(original,models)
     config['listeners'][0]['address']='0.0.0.0:28443'
     dashboard=next(c for c in config['filter_chains'] if c['name']=='dashboard')
@@ -96,7 +109,7 @@ def start(metering,praxis,maas=None):
         for name,path in [('gateway-maas-db',lab.STATE/'gateway-maas-db'),
                           ('gateway-provider',lab.ROOT/'tests/common/provider.py'),
                           ('gateway-provider-start',lab.ROOT/'tests/pricetag/provider.py')]:secret(name,path)
-        run_mock_dependencies(maas)
+        run_mock_dependencies(maas,profiles=profiles)
     for name in ('gateway-sso-m2m','gateway-sso.json'):secret(name,lab.STATE/name)
     common=['--detach','--pod',lab.POD,'--label',lab.LABEL,'--cap-drop','ALL',
             '--security-opt','no-new-privileges','--pids-limit','256','--memory','512m']
@@ -122,6 +135,9 @@ def start_gateway(praxis,telemetry=False,service_name="enmaas-gateway"):
         '--secret',lab.secret_name('server.pem')+',target=/etc/praxis/tls.pem,mode=0444',
         '--secret',lab.secret_name('server.key')+',target=/etc/praxis/tls-key.pem,mode=0444',
         *(['-e','OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317','-e','OTEL_SERVICE_NAME='+service_name] if telemetry else []),
+        *(['--secret',lab.secret_name('mock-key-openai')+',type=env,target=OPENAI_API_KEY',
+           '--secret',lab.secret_name('mock-key-external')+',type=env,target=CUSTOM_EXTERNAL_API_KEY']
+          if (lab.STATE/'mock-profiles.json').exists() else []),
         praxis,'--config','/etc/praxis/config.json')
 
 def test():
@@ -221,12 +237,15 @@ if __name__=='__main__':
     parser.add_argument('action',choices=('start','test','deactivate','inference','promote','demote'))
     parser.add_argument('--metering-image')
     parser.add_argument('--praxis-image')
+    parser.add_argument('--mock-profiles',action='store_true',help='Use standard openai/external profile aliases with mock endpoints')
     parser.add_argument('--maas-image',help='Enable private MaaS and deterministic mock providers')
     args=parser.parse_args()
     if args.action=='start' and not (args.metering_image and args.praxis_image):
         parser.error('start requires both reviewed application images')
+    if args.mock_profiles and (args.action!='start' or not args.maas_image):
+        parser.error('--mock-profiles requires start with --maas-image')
     try:
-        if args.action=='start':start(args.metering_image,args.praxis_image,args.maas_image)
+        if args.action=='start':start(args.metering_image,args.praxis_image,args.maas_image,profiles=args.mock_profiles)
         elif args.action in ('promote','demote'):role_action('super_admin' if args.action=='promote' else 'user')
         elif args.action=='inference':inference_probe()
         elif args.action=='deactivate':partner_action('deactivate')

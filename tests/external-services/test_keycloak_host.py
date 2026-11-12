@@ -10,6 +10,29 @@ spec=importlib.util.spec_from_file_location('keycloak_host',Path(__file__).with_
 host=importlib.util.module_from_spec(spec);spec.loader.exec_module(host)
 
 class Host(unittest.TestCase):
+    def test_dns_issuer_and_private_gateway_mapping_keep_exact_identity(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            host.configure(root,'192.0.2.10','192.0.2.11','192.0.2.12',
+                           issuer_name='identity.lab.example.com',issuer_private_ip='10.0.0.10')
+            oidc=json.loads((root/'gateway-oidc.json').read_text())
+            self.assertEqual(oidc['issuer_url'],'https://identity.lab.example.com:8443/realms/enmaas-lab')
+            self.assertEqual(oidc['issuer_private_ip'],'10.0.0.10')
+            self.assertIn('hostname=https://identity.lab.example.com:8443', (root/'keycloak.conf').read_text())
+            self.assertIn('hostname-admin=https://localhost:18443', (root/'keycloak.conf').read_text())
+            realm=json.loads((root/'realm.json').read_text())
+            self.assertEqual(realm['clients'][1]['redirectUris'],['https://192.0.2.11:8443/oauth/callback'])
+
+    def test_private_issuer_requires_complete_valid_pair_before_writes(self):
+        for options in ({'issuer_name':'identity.lab.example.com'},
+                        {'issuer_private_ip':'10.0.0.10'},
+                        {'issuer_name':'identity.lab.example.com','issuer_private_ip':'8.8.8.8'}):
+            with tempfile.TemporaryDirectory() as d:
+                root=Path(d)
+                with self.assertRaises(ValueError):
+                    host.configure(root,'192.0.2.10','192.0.2.11','192.0.2.12',**options)
+                self.assertFalse(list(root.iterdir()))
+
     def test_units_keep_database_private_and_admin_loopback_only(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d)
@@ -31,6 +54,9 @@ class Host(unittest.TestCase):
             allowed=[c['unless']['path_prefix'] for c in reject['conditions']]
             self.assertEqual(allowed,['/realms/enmaas-lab/','/resources/'])
             realm=json.loads((root/'realm.json').read_text())
+            self.assertTrue(realm['bruteForceProtected'])
+            self.assertFalse(realm['permanentLockout'])
+            self.assertEqual(realm['failureFactor'],5)
             self.assertNotIn('lab-authorization-test', {c['clientId'] for c in realm['clients']})
             self.assertNotIn('authorization_test', json.loads((root/'credentials.json').read_text()))
             self.assertEqual(realm['clients'][1]['redirectUris'],['https://192.0.2.11:8443/oauth/callback'])

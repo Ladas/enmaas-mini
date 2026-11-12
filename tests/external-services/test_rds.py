@@ -11,6 +11,15 @@ spec=importlib.util.spec_from_file_location('rds_plan',Path(__file__).with_name(
 rds=importlib.util.module_from_spec(spec);spec.loader.exec_module(rds)
 
 class RdsPlan(unittest.TestCase):
+    def test_group_tag_is_applied_to_all_planned_database_resources(self):
+        args = self.inputs()
+        args['prefix'] = 'em-demo-0123456789ab'
+        plan = rds.build_plan(**args)
+        for key in ('Instance', 'SubnetGroup', 'ParameterGroup'):
+            tags = {row['Key']: row['Value'] for row in plan[key]['Tags']}
+            self.assertEqual(tags['enmaas:group'], 'demo')
+            self.assertEqual(tags['enmaas:run'], args['prefix'])
+
     def inputs(self):
         return dict(account='123456789012',region='eu-central-1',prefix='lab-test',vpc='vpc-12345678',
             gateway_group='sg-12345678',engine_version='17.6',instance_class='db.t4g.small',subnets=[
@@ -29,7 +38,7 @@ class RdsPlan(unittest.TestCase):
         plan=rds.build_plan(**self.inputs())
         responses=[{'GroupId':'sg-abcdef12'},{}, {'DBSubnetGroup':{'DBSubnetGroupArn':'arn:subnet'}},
             {'DBParameterGroup':{'DBParameterGroupArn':'arn:parameter'}},{},
-            {'DBInstance':{'DBInstanceIdentifier':'lab-test-postgres','DBInstanceArn':'arn:db','MasterUserSecret':{'SecretArn':'arn:secret'}}}]
+            {'DBInstance':{'DBInstanceIdentifier':'lab-test-postgres','DBInstanceArn':'arn:db','DbiResourceId':'db-ORIGINAL','MasterUserSecret':{'SecretArn':'arn:secret'}}}]
         for failure in range(7):
             with self.subTest(failure=failure),tempfile.TemporaryDirectory() as directory:
                 journal=Path(directory)/'rds.json';aws=Mock()
@@ -48,6 +57,7 @@ class RdsPlan(unittest.TestCase):
                     payload=aws.call.call_args.kwargs
                     self.assertEqual(payload['VpcSecurityGroupIds'],['sg-abcdef12'])
                     self.assertTrue(payload['ManageMasterUserPassword'])
+                    self.assertEqual(state['Resources']['Instance']['ResourceId'],'db-ORIGINAL')
                 before=aws.call.call_count
                 with self.assertRaises(FileExistsError):rds.create(aws,plan,journal)
                 self.assertEqual(before,aws.call.call_count)
@@ -55,19 +65,35 @@ class RdsPlan(unittest.TestCase):
     def test_verifier_rejects_public_unencrypted_or_broad_ingress(self):
         import copy
         plan=rds.build_plan(**self.inputs())
-        state={'Plan':plan,'Created':True,'Pending':None,'Resources':{'SecurityGroup':'sg-abcdef12','Instance':{'Arn':'arn:db'}}}
-        db={**plan['Instance'],'DBInstanceArn':'arn:db','DBInstanceStatus':'available',
+        state={'Plan':plan,'Created':True,'Pending':None,'Resources':{'SecurityGroup':'sg-abcdef12', 'SubnetGroup':'arn:subnet', 'ParameterGroup':'arn:parameter', 'Instance':{'Arn':'arn:db', 'ResourceId':'db-ORIGINAL', 'MasterSecretArn':'arn:secret'}}}
+        db={**plan['Instance'],'DBInstanceArn':'arn:db','DbiResourceId':'db-ORIGINAL','DBInstanceStatus':'available',
             'VpcSecurityGroups':[{'VpcSecurityGroupId':'sg-abcdef12'}],
-            'DBSubnetGroup':{'VpcId':plan['VpcId'],'DBSubnetGroupName':plan['Instance']['DBSubnetGroupName']},
+            'DBSubnetGroup':{'DBSubnetGroupArn':'arn:subnet','VpcId':plan['VpcId'],'DBSubnetGroupName':plan['Instance']['DBSubnetGroupName']},
             'DBParameterGroups':[{'DBParameterGroupName':plan['Instance']['DBParameterGroupName'],'ParameterApplyStatus':'in-sync'}],
             'MasterUserSecret':{'SecretArn':'arn:secret','SecretStatus':'active'},'Endpoint':{'Address':'db.example.test','Port':5432}}
         group={'OwnerId':plan['AccountId'],'VpcId':plan['VpcId'],'IpPermissions':[plan['Ingress']],'Tags':plan['Instance']['Tags']}
-        def check(database,security_group):
+        def check(database,security_group,tags=None,parameter_arn='arn:parameter'):
             aws=Mock()
             aws.call.side_effect=[{'Account':plan['AccountId']},{'DBInstances':[database]},
-                {'SecurityGroups':[security_group]},{'Parameters':plan['Parameters']}]
+                {'SecurityGroups':[security_group]},{'Parameters':plan['Parameters']},
+                {'DBParameterGroups':[{'DBParameterGroupArn':parameter_arn}]},
+                *[{'TagList':(plan['Instance']['Tags'] if tags is None else
+                             tags.get(index,plan['Instance']['Tags']) if isinstance(tags,dict) else tags)}
+                  for index in range(3)]]
             return rds.verify(aws,state,plan['AccountId'],plan['Region'])
         self.assertTrue(check(db,group)['Ready'])
+        original_id=state['Resources']['Instance'].pop('ResourceId')
+        with self.assertRaisesRegex(ValueError,'immutable resource ID'):check(db,group)
+        state['Resources']['Instance']['ResourceId']=original_id
+        for changed in ({**db, 'DbiResourceId':'db-REPLACEMENT'},
+                        {**db, 'MasterUserSecret': {'SecretArn': 'foreign', 'SecretStatus': 'active'}},
+                        {**db, 'DBSubnetGroup': {**db['DBSubnetGroup'], 'DBSubnetGroupArn': 'foreign'}}):
+            with self.assertRaises(ValueError):check(changed,group)
+        for index in range(3):
+            with self.subTest(dependency=index),self.assertRaises(ValueError):
+                check(db,group,tags={index:[]})
+        with self.assertRaises(ValueError):check(db,group,parameter_arn='foreign')
+
         for field,value in [('PubliclyAccessible',True),('StorageEncrypted',False),('DeletionProtection',False)]:
             changed={**db,field:value}
             with self.subTest(field=field),self.assertRaises(ValueError):check(changed,group)

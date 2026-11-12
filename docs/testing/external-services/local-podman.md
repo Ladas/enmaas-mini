@@ -4,6 +4,8 @@ Test the external identity and observability services before deploying the three
 
 **Scope:** this fixture tests Keycloak → OAuth2 Proxy → Perses and mTLS collector → Prometheus/Loki/Tempo. It also tests the gateway OIDC client against Keycloak: signed immutable identity claims, issuer/audience/nonce, expiry and authorization-code replay rejection. The optional gateway tests below also exercise actual PriceTag login, account deactivation, shared SSO and Praxis metrics/traces. Native MaaS JSON/SSE inference, per-user accounting and all six traffic phases have passed locally. This is not a fresh RHEL installation test.
 
+For interactive access after setup, follow [local dashboards](local-dashboards.md). See [topology](topology.md) for the two collector roles and [security acceptance](security-acceptance.md) for what this fixture cannot prove.
+
 ## Start and test
 
 Use a running rootless Podman environment, Python 3 with PyYAML, OpenSSL and Node.js. The local test was run on an ARM64 Podman VM with 4 CPUs and 8 GiB RAM. Allow space for eight images and test data. Run from the repository checkout:
@@ -29,6 +31,80 @@ The launcher uses the reviewed digests in `tests/external-services/images.json`.
 | `https://localhost:24443/v1/…` | OTLP HTTP ingestion | Private-CA TLS **and a client certificate**. |
 
 All three ports bind to host loopback. During the issuer test, a temporary HTTPS callback receiver binds to `127.0.0.1:28443`; this is a test receiver, not a running Mini gateway. Database, Prometheus, Loki, Tempo and direct Perses ports are not published. Containers share one trusted pod network to give the browser and OIDC clients the same `localhost` issuer. This does **not** test isolation between the RHEL VMs.
+
+## Repeat collector trust checks
+
+The standard `local.py test` includes this probe. To repeat it independently against
+the selected running fixture:
+
+```sh
+python3 tests/external-services/collector-trust.py
+```
+
+It verifies valid-client delivery before and after negative tests, rejects a
+missing client certificate and a valid client chain signed by an unrelated CA,
+and verifies that an unrelated server CA cannot establish trust. Temporary keys
+are created privately and removed automatically. Existing service certificates
+and trust stores are unchanged. This does not qualify expiry, revocation or
+certificate rotation on separate RHEL nodes.
+
+## Receiver outage and recovery
+
+Run only against the existing **mock** gateway fixture with telemetry enabled.
+This test takes the benchmark lock, temporarily stops its labeled collector,
+creates a temporary ordinary user/key and restores the collector and gateway
+configuration in cleanup. Do not run another benchmark or manage this fixture
+concurrently.
+
+```sh
+python3 tests/external-services/collector-outage.py --seconds 30
+```
+
+The test checks successful inference and exact event/token/USD accounting while
+the receiver is stopped, then fresh synthetic metrics/logs/traces after recovery. An additional inference
+request must produce fresh gateway metrics and traces without replacing the
+gateway container; its accounting is reconciled too.
+It retires its temporary user/key and saves private evidence under the printed
+run directory. Ctrl-C or SIGTERM requests restoration and cleanup; allow it to
+finish. SIGKILL, host shutdown or an unavailable Podman engine can prevent cleanup:
+inspect the selected fixture and its private run journal before another test. A 30-second local outage passed. This does **not** establish
+lossless delivery of outage-time telemetry, exporter queue capacity, long-outage
+behavior or separate-host availability.
+
+## Private issuer hostname transport
+
+```sh
+python3 tests/external-services/private-issuer-runtime.py
+python3 tests/external-services/private-issuer-runtime.py --keycloak
+```
+
+This disposable test uses an internal Podman network with no published ports. A
+client resolves the issuer hostname to the server's private address, verifies its
+CA/hostname and reads an issuer document. A wrong hostname is rejected. The test
+removes its containers, secrets, network and signing keys; it does not change the
+running demo or host DNS. It uses the pinned Python image already imported by the
+lab and refuses implicit pulls.
+
+The second command uses the pinned Keycloak image and a disposable development
+database. It verifies that discovery, authorization, token, JWKS and logout URLs
+retain the canonical DNS issuer when reached over the private address. It then
+performs form login, PKCE code exchange and authenticated userinfo for the three
+generated users with both clients. Immutable identity and observability group
+claims must match; reused codes and wrong PKCE verifiers must fail. Both images
+must already be present. It does not use the running demo realm.
+
+The same test starts the pinned OAuth2 Proxy with the generated client settings,
+private issuer mapping and a static protected response. It requires an accepted
+administrator session, denied Alice/Bob sessions, and rejection of anonymous or
+forged identity headers. This also requires the pinned auth-proxy image locally.
+Only startup readiness is retried; authorization failures stop the test.
+
+This qualifies issuer transport and the proxy's OIDC/session/group behavior,
+**not browser cookie policies**, PriceTag sessions, three-host routing, public DNS
+or RHEL firewall policy. The proxy uses its normal token validation; the separate
+Python issuer-protocol client is not an application JWT verifier.
+Passwords and client secrets are generated for this disposable realm, supplied
+through Podman secrets to the fixture containers that need them, and never printed.
 
 ## What the test verifies
 
@@ -65,8 +141,8 @@ Reset after certificate expiry. A configuration change also requires recreating 
 
 This test does not establish production readiness. Remaining checks are:
 
-- Pin the separately tested PriceTag logout CSP fix. Existing-session role changes and confirmed logout pass with that fix; the unpatched candidate does not provide a working browser logout flow.
-- Ten-minute benchmark phases, host-resource timer execution, restricted log forwarding and trace navigation. Local six-phase runs, accounting reconciliation, gateway telemetry and traffic/resource dashboards pass.
+- Use the pinned PriceTag source revision below. Existing-session role changes and confirmed logout passed with that revision; qualify the same image on RHEL.
+- Repeat host-resource timer execution, restricted log forwarding and trace navigation on RHEL, and run the full ten-minute benchmark phases. These paths have local coverage with shorter traffic phases.
 - Separate service certificates and private networks; systemd/Quadlet, SELinux, reboot and firewall behavior.
 - Retention deletion and disk limits: Prometheus is configured for 48 hours/512 MB, Loki/Tempo for 24 hours; elapsed-time deletion is not yet qualified. Logs/traces have no tested disk quota.
 - ARM64 was exercised locally; the RHEL AMD64 deployment still needs qualification.
@@ -126,6 +202,20 @@ Run once per fresh fixture. The probe creates a dedicated user, a USD budget, ex
 
 This checks inference and token accounting. It also checks the exact recorded USD charge at the synthetic rates. It does not qualify discounts, concurrent quota enforcement, the complete workload sequence or capacity. All service peers share the trusted local fixture namespace; RHEL peer isolation remains separate acceptance work.
 
+## Replaceable provider profiles
+
+For a **fresh** MaaS-enabled fixture, add `--mock-profiles` to `gateway-sso.py start`. This publishes the same `openai/` and `external/` model aliases as the real installer, with deterministic private mock backends. It reads model limits from reviewed presets and keeps imported prices instead of replacing them with synthetic rates. See [provider management](providers.md) for profile ownership and RHEL conversion to real endpoints.
+
+After the identity tests, exercise every configured alias through its native API and verify imported-price accounting:
+
+```sh
+python3 tests/external-services/profile-inference.py --praxis-image "$PRAXIS_IMAGE"
+```
+
+This creates and retires one test identity; run it separately from a benchmark. It does not change imported model rates.
+
+The default benchmark uses the first OpenAI-compatible mock alias. Select another with `local-benchmark.py --model external/gpt-5.4-mini` (along with its usual image/duration options). The exact-price check requires an imported price row and reconciles stored per-request rounding. The legacy `gateway-sso.py inference` probe is for the original `fixture` configuration; do not use it on this profile variant.
+
 ## Local workload sequence
 
 With the MaaS-enabled fixture still running, use the same six phases as the RHEL runner:
@@ -138,6 +228,8 @@ python3 tests/external-services/local-benchmark.py \
 The duration is per phase. Use a short run for troubleshooting; use at least 65 seconds to include an active/idle burst cycle. The default is ten minutes per phase. The local generator opens a new TLS connection per request and runs on the workstation; results are not a prediction of RHEL capacity.
 
 The runner creates isolated users and finite keys, changes only the fixture gateway rate limiter, captures container resource samples and checks per-user events, tokens and stored USD charges. It restores the gateway configuration, disables the benchmark users and revokes their keys on exit. Private `summary.json`, `resources.jsonl` and `cleanup.json` remain under the named fixture state. Inspect `cleanup.json` after any failure. Do not run other fixture-management commands concurrently.
+
+Preflight requires at least 10% available Linux host memory and 30% available disk space; these checks continue during traffic. A capacity stop reports the threshold without printing credentials. On macOS, the checked host is the Podman Linux VM. Keep data volumes and previous results when freeing space; do not run a broad Podman prune.
 
 ## Inspect the results
 
@@ -166,6 +258,14 @@ NODE_EXTRA_CA_CERTS="$LAB_STATE/ca.pem" \
 ```
 
 Use the same `ENMAAS_LAB_INSTANCE` and `LAB_STATE` as the running fixture. The helper reads only aggregate CPU, memory, load and filesystem capacity; on macOS it runs the sampler inside the Podman machine. Perses exposes the **enMAAS gateway — host resources** dashboard through its existing SSO gate. CPU needs at least two samples. This qualifies the sample/transport/dashboard path, not the RHEL systemd timer or host firewall policy.
+
+For the full six-phase benchmark, start a longer sampler in another terminal with the same repository and `ENMAAS_LAB_INSTANCE`:
+
+```sh
+python3 tests/external-services/local-host-metrics.py --samples 150 --interval 30
+```
+
+This supplies roughly 75 minutes of host metrics, including setup time. It is read-only on the Linux host and can run alongside the benchmark. Container resource samples are also captured independently by the benchmark runner.
 
 ## Trace navigation
 

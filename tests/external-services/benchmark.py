@@ -21,6 +21,7 @@ import sys
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 import urllib.request
 import uuid
 
@@ -157,7 +158,11 @@ class RhelController:
         self.config=DEPLOY/'gateway/gateway.json'
         self.original=self.config.read_bytes()
         (self.output/'gateway-original.json').write_bytes(self.original)
-        self.model=json.loads((DEPLOY/'models.json').read_text())[0]['id']
+        model=json.loads((DEPLOY/'models.json').read_text())[0]
+        self.model=model['id']
+        pricing=SimpleNamespace(database='pricetag-db',database_name='metering',service_user='praxis-svc')
+        cost=self.perf.mock_request_cost(pricing,model['model'])
+        self.summary.update(model=self.model,expected_usd_per_request=str(cost))
         self.provisioned=True  # Includes an account created before key issuance failed.
         code=managed_command([sys.executable,str(ROOT/'scripts/pricetag/perf'),'users','--tokens',str(self.output/'keys'),
             '--prefix',self.name,'--count',str(count),'--monthly-usd','10000'],timeout=900,stop=self.stop)

@@ -22,6 +22,15 @@ sso=load('sso','gateway-sso.py');agent=load('agent','telemetry-agent.py');signal
 lab=sso.lab
 
 
+def relay_runtime_options():
+    # The local metrics/trace relay does not mount application logs. Its shared
+    # configuration still initializes the file receiver; keep its offsets in
+    # bounded disposable memory. Persistent log-offset tests use log-runtime.py.
+    return ['--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
+            '--memory', '256m', '--pids-limit', '128',
+            '--tmpfs', '/positions:rw,noexec,nosuid,size=16m,mode=1777']
+
+
 def main(praxis):
     config=agent.configuration('10.0.0.20')
     # Fixture services share one trusted namespace. Production uses private-IP
@@ -33,7 +42,7 @@ def main(praxis):
     for name,file in [('gateway-relay',lab.STATE/'gateway-relay.yaml'),('gateway-client',lab.STATE/'client.pem'),('gateway-client-key',lab.STATE/'client.key')]:
         sso.secret(name,file)
     sso.run('run','--detach','--pod',lab.POD,'--name',lab.POD+'-gateway-relay','--label',lab.LABEL,
-        '--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--memory','256m','--pids-limit','128',
+        *relay_runtime_options(),
         '--secret',lab.secret_name('gateway-relay')+',target=/lab/collector.yaml,mode=0444',
         '--secret',lab.secret_name('ca.pem')+',target=/lab/server-ca.pem,mode=0444',
         '--secret',lab.secret_name('gateway-client')+',target=/lab/client.pem,mode=0444',

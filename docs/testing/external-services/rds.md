@@ -55,6 +55,23 @@ python3 tests/external-services/rds.py \
 
 Verification checks network isolation, storage encryption/bounds, backups, deletion protection, managed credential and TLS parameter state. `Ready: true` means AWS configuration is available; it does not prove application roles, network connectivity, certificate validation or migrations. Bootstrap and end-to-end integration remain the next acceptance step.
 
+## Ownership verification
+
+Verification compares the database, subnet-group and parameter-group ARNs with
+the creation journal, checks their ownership tags and the security-group tags,
+and requires the managed master-secret ARN to match its recorded reference.
+New journals also record the database's immutable `DbiResourceId`; verification
+rejects a replacement database even when its name/ARN matches. A missing resource
+ID in an older journal requires manual reconciliation, not automatic adoption of
+the current database. Preserve the original creation evidence.
+It never reads the secret value. Missing or changed references stop verification;
+do not repair a mismatch by copying live IDs into the journal without investigating
+why ownership changed. Incomplete creation still requires reconciliation.
+
+These checks support a future cleanup plan but do not delete resources or qualify
+AWS IAM permissions. Snapshot/backup retention and managed-secret lifecycle remain
+separate cleanup decisions.
+
 ## Bootstrap application credentials
 
 Run this once for a **fresh** RDS instance. The helper refuses existing `maas` or `metering` roles/databases and an existing output directory. It creates two restricted login roles, separate owned databases and private installer inputs. It verifies TLS and rejects elevated roles or cross-database `CONNECT` permission. It does not rotate or adopt existing credentials.

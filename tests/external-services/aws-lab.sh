@@ -10,10 +10,29 @@ aws_lab_plan() {
 aws_lab_deploy() {
   # Preserve separate confirmation and recovery journal for every billable VM.
   # On partial failure resume the specific role, never relaunch the full batch.
+  local lab_status=0
   aws_lab_plan &&
   aws_test_deploy gateway "$AWS_TEST_REPO/tests/external-services/gateway-vm.json" --scenario remote-gateway --ssh-access restricted --https-access restricted &&
   aws_test_deploy keycloak "$AWS_TEST_REPO/tests/external-services/keycloak-vm.json" --scenario keycloak --ssh-access restricted --https-access restricted &&
-  aws_test_deploy observability "$AWS_TEST_REPO/tests/external-services/observability-vm.json" --scenario observability --ssh-access restricted --https-access restricted
+  aws_test_deploy observability "$AWS_TEST_REPO/tests/external-services/observability-vm.json" --scenario observability --ssh-access restricted --https-access restricted || lab_status=$?
+  # Keep recovery information visible even after a partial launch failure.
+  aws_lab_summary || return 1
+  return "$lab_status"
+}
+
+aws_lab_summary() {
+  if [[ -z "${RUN_PREFIX:-}" ]]; then
+    printf 'No deployment selected; no recovery journal summary available.\n' >&2
+    return 0
+  fi
+  local lab_manifest="$AWS_TEST_REPO/.state/deployments/$RUN_PREFIX.json"
+  if [[ -f "$lab_manifest" ]]; then
+    python3 "$AWS_TEST_REPO/tests/external-services/deployments.py" summary \
+      "$lab_manifest" --journals "$AWS_TEST_REPO/.state"
+  else
+    printf 'Recovery journals: %s/.state/%s-<role>.json\n' "$AWS_TEST_REPO" "$RUN_PREFIX"
+    printf 'No registry manifest: retain each VM journal for recovery and ownership verification.\n'
+  fi
 }
 
 aws_lab_info() {

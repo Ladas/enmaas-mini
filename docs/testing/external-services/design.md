@@ -1,6 +1,6 @@
 # Three-VM lab design and acceptance
 
-The [gateway OIDC input contract](oidc.md) describes protected configuration and outstanding browser qualification.
+Start with [node and collector ownership](topology.md). The [gateway OIDC input contract](oidc.md) describes protected configuration; [security acceptance](security-acceptance.md) separates verified local behavior from pending AWS/RHEL checks.
 
 ## Existing work and ownership
 

@@ -11,6 +11,7 @@ import ssl
 import subprocess
 import time
 import uuid
+import yaml
 import urllib.error
 import urllib.request
 
@@ -26,6 +27,22 @@ PORTS = (18443, 19443, 24443)
 IMAGES = {name: entry['image'] for name, entry in json.loads((HERE/'images.json').read_text()).items()}
 PERSES_ASSETS = ('project.json', 'datasource.json', 'dashboard.json', 'gateway-dashboard.json',
                  'host-dashboard.json', 'tempo-datasource.json', 'traces-dashboard.json', 'trace-detail-dashboard.json', 'loki-datasource.json', 'logs-dashboard.json')
+
+
+def privacy_transform():
+    resource=['keep_keys(attributes, ["service.name", "service.version", "deployment.environment.name"])']
+    scope=['set(name, "enmaas")','set(version, "")','keep_keys(attributes, [])']
+    attributes='keep_keys(attributes, ["http.request.method", "http.response.status_code", "error.type", "gen_ai.provider.name", "gen_ai.request.model"])'
+    transform={'error_mode':'propagate',
+        'log_statements':[{'context':'resource','statements':resource},{'context':'scope','statements':scope},
+            {'context':'log','statements':[attributes,'set(body, "gateway event")','set(severity_text, "")']}],
+        'trace_statements':[{'context':'resource','statements':resource},{'context':'scope','statements':scope},
+            {'context':'span','statements':[attributes,'set(name, "request")','set(status.message, "")','set(trace_state, "")','set(links, nil)']},
+            {'context':'spanevent','statements':['set(name, "event")','keep_keys(attributes, [])']}],
+        'metric_statements':[{'context':'resource','statements':resource},{'context':'scope','statements':scope},
+            {'context':'metric','statements':['set(description, "")','set(unit, "")']},
+            {'context':'datapoint','statements':['keep_keys(attributes, ["http.request.method", "http.response.status_code", "gen_ai.request.model", "state", "cpu", "device", "direction", "type", "cluster", "route", "listener", "endpoint", "method", "status_class", "filter", "phase", "quantile", "le", "result", "reason"])','set(exemplars, nil) where metric.type != METRIC_DATA_TYPE_SUMMARY']}]}
+    return transform
 
 
 def command(args, **kwargs):
@@ -63,6 +80,10 @@ def configure(root, certificates=True, authorization_test=False):
     write(root, 'realm.json', {
         'realm': 'enmaas-lab', 'enabled': True, 'sslRequired': 'all',
         'registrationAllowed': False, 'resetPasswordAllowed': False,
+        'bruteForceProtected': True, 'permanentLockout': False, 'maxTemporaryLockouts': 0,
+        'failureFactor': 5, 'waitIncrementSeconds': 60,
+        'minimumQuickLoginWaitSeconds': 60, 'quickLoginCheckMilliSeconds': 1000,
+        'maxFailureWaitSeconds': 900, 'maxDeltaTimeSeconds': 43200,
         'accessTokenLifespan': 60, 'ssoSessionIdleTimeout': 300, 'ssoSessionMaxLifespan': 1800,
         'groups': [{'name': 'observability-admin'}], 'users': users,
         'clients': [{'clientId': 'observability', 'secret': credentials['oidc'],
@@ -251,6 +272,7 @@ usage_report:
     protocols:
       http:
         endpoint: 0.0.0.0:24443
+        max_request_body_size: 4194304
         tls:
           cert_file: /lab/server.pem
           key_file: /lab/server.key
@@ -260,19 +282,10 @@ processors:
     check_interval: 1s
     limit_mib: 128
     spike_limit_mib: 32
-  transform:
-    error_mode: propagate
-    log_statements:
-      - context: log
-        statements:
-          - delete_key(attributes, "authorization")
-          - delete_key(attributes, "cookie")
-    trace_statements:
-      - context: span
-        statements:
-          - delete_key(attributes, "authorization")
-          - delete_key(attributes, "cookie")
-  batch: {}
+  batch:
+    timeout: 5s
+    send_batch_size: 256
+    send_batch_max_size: 512
 exporters:
   prometheus:
     endpoint: 127.0.0.1:8889
@@ -295,6 +308,11 @@ service:
       processors: [memory_limiter, transform, batch]
       exporters: [otlphttp/tempo]
 ''')
+    collector = yaml.safe_load((root/'collector.yaml').read_text())
+    collector['processors']['transform'] = privacy_transform()
+    for pipeline in collector['service']['pipelines'].values():
+        pipeline['processors'] = ['memory_limiter', 'transform', 'batch']
+    write(root, 'collector.yaml', yaml.safe_dump(collector, sort_keys=False))
     if certificates:
         issue_certificates(root)
 
@@ -407,6 +425,22 @@ def wait_url(url):
     raise RuntimeError(f'HTTPS readiness failed: {url}; inspect container status/logs locally')
 
 
+def require_tls_rejection(request, tls_context):
+    """A network outage or HTTP denial is not evidence of client-certificate TLS."""
+    try:
+        response = urllib.request.urlopen(request, context=tls_context, timeout=5)
+    except ssl.SSLError:
+        return
+    except urllib.error.URLError as error:
+        if isinstance(error.reason, ssl.SSLError):
+            return
+        raise RuntimeError('Client-certificate probe did not establish TLS rejection') from None
+    except OSError:
+        raise RuntimeError('Client-certificate probe failed before TLS qualification') from None
+    response.close()
+    raise RuntimeError('Collector accepted TLS without a client certificate')
+
+
 def check():
     for component, endpoint in (('perses', '8080/api/v1/health'),
                                 ('prometheus', '9090/-/ready'),
@@ -431,12 +465,7 @@ def check():
     payload = json.dumps({'resourceMetrics': []}).encode()
     request = urllib.request.Request('https://localhost:24443/v1/metrics', data=payload,
                                      headers={'Content-Type': 'application/json'})
-    try:
-        urllib.request.urlopen(request, context=context(), timeout=5)
-    except (urllib.error.URLError, ssl.SSLError):
-        pass
-    else:
-        raise RuntimeError('Collector accepted a request without a client certificate')
+    require_tls_rejection(request, context())
     with urllib.request.urlopen(request, context=context(client=True), timeout=5) as response:
         assert response.status == 200
     print('PASS: verified issuer TLS; anonymous UI denial; collector requires client certificate.')
@@ -447,6 +476,7 @@ def check():
 
 def test():
     check()
+    command(['python3', str(HERE/'collector-trust.py')])
     command(['python3', str(HERE/'signals.py')])
     env = dict(os.environ)
     env['NODE_EXTRA_CA_CERTS'] = str(STATE/'ca.pem')

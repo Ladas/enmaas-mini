@@ -1,6 +1,105 @@
 # Manual AWS cleanup
 
-Run cleanup from the AWS administrator workstation or console. The lab helper never deletes resources. Keep the launch journals and export sanitized benchmark evidence before deleting anything. Match the account, region, run prefix and resource IDs; names alone are insufficient ownership evidence.
+Run cleanup from the AWS administrator workstation or console. The VM/RDS helpers do not delete resources. The separate [DNS helper](dns.md) can delete exact journaled DNS records after explicit confirmation. Keep the launch journals and export sanitized benchmark evidence before deleting anything. Match the account, region, run prefix and resource IDs; names alone are insufficient ownership evidence.
+
+## Read-only inventory for registry-created deployments
+
+For a deployment created with the new registry-generated run prefix, the following
+command compares its three VM journals with live EC2 resources. Run it in your
+AWS operator terminal using the existing profile recorded in the manifest:
+
+```sh
+python3 tests/external-services/cleanup-inventory.py \
+  ".state/deployments/$RUN_PREFIX.json" --state-dir .state
+```
+
+It requires the recorded account, region, role, instance/group/key identifiers,
+ownership tags and root-volume relationships to agree. Missing or extra tagged
+resources stop the inventory for reconciliation. It refuses unexpected disks,
+foreign attachments and changed deletion flags. Only resource metadata is printed.
+
+New VM launches tag instances, volumes and their new primary network interfaces
+at creation. Recovery journals record that tag contract so retries preserve the
+original request. Older journals retain their original instance/volume-only tags;
+the helper does not retag or adopt existing interfaces. This uses
+[RunInstances creation-time tagging](https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_RunInstances.html)
+and requires the operator's creation-tag permissions to cover network interfaces.
+Tags alone never authorize deletion of an interface.
+
+The inventory also queries [network interfaces by security group](https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-network-interfaces.html),
+without requiring deployment tags on those interfaces. It reports journaled VM
+attachments, service-managed interfaces and unresolved dependencies. Sharing a
+security group does **not** establish ownership or authorize interface deletion.
+Reconcile service-managed interfaces through their owning service and inspect
+unresolved dependencies before removing groups. A partial response or unexpected
+account/query scope stops the inventory. Unassociated retained resources still
+require separate inspection.
+
+`security_group_references` also lists current-account inbound and outbound rules
+referencing a deployment group, using the documented
+[security-group reference filters](https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-security-groups.html).
+The source group is marked owned only if it is already in the verified deployment
+inventory. References from other groups require owner coordination; the helper
+never adopts or modifies them. Partial responses, mismatched accounts and results
+outside the requested scope stop inventory. Cross-account and peered-VPC references
+remain separate checks; an empty list does not prove a group can be deleted.
+
+If this deployment includes RDS, add its private creation journal:
+
+```sh
+python3 tests/external-services/cleanup-inventory.py \
+  ".state/deployments/$RUN_PREFIX.json" --state-dir .state \
+  --rds-journal ".state/$RUN_PREFIX-rds.json"
+```
+
+The report includes verified RDS dependency ARNs and the managed-secret reference;
+it never reads that secret. The RDS group must be distinct from the VM groups.
+The database's immutable resource ID must also match the creation journal; the
+inventory prints it for later backup/deletion review. A name/ARN match alone is
+insufficient to adopt a replacement database.
+Final snapshot and backup-retention choices remain explicit operator decisions.
+
+`retained_storage` lists the original database's same-region RDS snapshots and
+automated backups using its immutable ID. Each entry has
+`deletion_authorized: false`; metadata matching is not permission to delete data.
+Incomplete pagination, duplicate records and mismatched source/account/region
+stop inventory. The helper still requires a live, verified database for the full
+RDS inventory; after database deletion, reconcile retained data manually using
+the preserved resource ID and journal.
+
+Cross-region copies, AWS Backup vault recovery points and final-snapshot choices
+are outside this listing. Check them separately. An empty result is not proof
+that no retained database data or billable backups exist anywhere in the account.
+
+**No deletion is implemented by this command.** DNS, IAM, retained RDS storage,
+network-dependency reconciliation and partial-launch recovery still need the
+inventory below.
+Older runs without the shared ownership tag use the manual procedure; do not
+retag resources just to make the new inventory accept them. Offline tests cover
+ownership mismatches; live AWS validation is pending.
+
+## Ordered teardown review
+
+Add `--teardown-plan` to the inventory command to include the affected resource
+IDs and manual review order:
+
+```sh
+python3 tests/external-services/cleanup-inventory.py \
+  ".state/deployments/$RUN_PREFIX.json" --state-dir .state --teardown-plan
+```
+
+Include `--rds-journal ".state/$RUN_PREFIX-rds.json"` when RDS was provisioned.
+This still performs only read operations. The plan orders data preservation and
+quiescing, instance termination, optional database deletion, dependency cleanup,
+imported public-key removal and finally local-state review. It lists root volumes
+that would be deleted with the VMs and keeps final snapshots/automated-backup
+retention as explicit decisions. RDS-managed secrets remain service-owned.
+
+**This is not a cleanup executor.** Unresolved interfaces and unverified DNS/IAM,
+security-group references, cross-region backups or partial launches require
+reconciliation. Even an empty unresolved-interface list does not authorize
+deletion. Revalidate live ownership before each manual mutation; retain journals
+and keys until cleanup is reconciled.
 
 ## Print the deletion inventory
 

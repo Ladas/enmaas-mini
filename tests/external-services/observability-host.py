@@ -11,26 +11,44 @@ import yaml
 HERE=Path(__file__).resolve().parent
 spec=importlib.util.spec_from_file_location('local_lab',HERE/'local.py')
 lab=importlib.util.module_from_spec(spec);spec.loader.exec_module(lab)
+spec=importlib.util.spec_from_file_location('issuer_identity',HERE/'issuer-config.py')
+identity=importlib.util.module_from_spec(spec);spec.loader.exec_module(identity)
 
 
-def privacy_transform():
-    resource=['keep_keys(attributes, ["service.name", "service.version", "deployment.environment.name"])']
-    scope=['set(name, "enmaas")','set(version, "")','keep_keys(attributes, [])']
-    attributes='keep_keys(attributes, ["http.request.method", "http.response.status_code", "error.type", "gen_ai.provider.name", "gen_ai.request.model"])'
-    transform={'error_mode':'propagate',
-        'log_statements':[{'context':'resource','statements':resource},{'context':'scope','statements':scope},
-            {'context':'log','statements':[attributes,'set(body, "gateway event")','set(severity_text, "")']}],
-        'trace_statements':[{'context':'resource','statements':resource},{'context':'scope','statements':scope},
-            {'context':'span','statements':[attributes,'set(name, "request")','set(status.message, "")','set(trace_state, "")','set(links, nil)']},
-            {'context':'spanevent','statements':['set(name, "event")','keep_keys(attributes, [])']}],
-        'metric_statements':[{'context':'resource','statements':resource},{'context':'scope','statements':scope},
-            {'context':'metric','statements':['set(description, "")','set(unit, "")']},
-            {'context':'datapoint','statements':['keep_keys(attributes, ["http.request.method", "http.response.status_code", "gen_ai.request.model", "state", "cpu", "device", "direction", "type", "cluster", "route", "listener", "endpoint", "method", "status_class", "filter", "phase", "quantile", "le", "result", "reason"])','set(exemplars, nil) where metric.type != METRIC_DATA_TYPE_SUMMARY']}]}
-    return transform
+# Shared policy for the local receiver, RHEL receiver and gateway agent.
+privacy_transform = lab.privacy_transform
+
+def private_address(value):
+    address = ipaddress.IPv4Address(value)
+    if not any(address in ipaddress.IPv4Network(network) for network in
+               ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16')):
+        raise ValueError('collector binding requires an explicit RFC1918 IPv4 address')
+    return str(address)
 
 
-def configure(root,issuer,observability,client_secret):
+def validate_host_binding(root, interfaces):
+    bindings = [line.split('=', 1)[1] for line in
+                (root/'quadlets/lab-observability.pod').read_text().splitlines()
+                if line.startswith('PublishPort=')]
+    private = [line[:-len(':24443:24443')] for line in bindings
+               if line.endswith(':24443:24443')]
+    if len(private) != 1 or sorted(bindings) != sorted(['8443:8443', private[0]+':24443:24443']):
+        raise ValueError('unexpected public/collector port bindings')
+    address = private_address(private[0])
+    assigned = {entry.get('local') for interface in interfaces
+                for entry in interface.get('addr_info', []) if entry.get('family') == 'inet'}
+    if address not in assigned:
+        raise ValueError('collector private address is not assigned to this host')
+    for unit in (root/'quadlets').glob('*.container'):
+        if any(line.startswith('PublishPort=') for line in unit.read_text().splitlines()):
+            raise ValueError('service ports must be published only by the reviewed pod')
+    return address
+
+
+def configure(root,issuer,observability,client_secret,private_ip,*,issuer_name=None,issuer_private_ip=None):
+    private_ip = private_address(private_ip)
     issuer,observability=(str(ipaddress.IPv4Address(value)) for value in (issuer,observability))
+    issuer,mapping=identity.resolve(issuer,issuer_name,issuer_private_ip)
     if not 16<=len(client_secret)<=4096 or any(not 33<=ord(c)<=126 or c in '\\"' for c in client_secret):
         raise ValueError('invalid confidential-client secret; use visible ASCII without quotes/backslashes')
     if any(root.iterdir()):raise FileExistsError('use a new empty output directory')
@@ -63,7 +81,8 @@ def configure(root,issuer,observability,client_secret):
         collector['exporters'][name]['retry_on_failure']={'enabled':True,'max_elapsed_time':'30s'}
     lab.write(root,'collector.yaml',yaml.safe_dump(collector,sort_keys=False))
     units=root/'quadlets';units.mkdir(mode=0o700)
-    lab.write(units,'lab-observability.pod','[Pod]\nPodName=lab-observability\nPublishPort=8443:8443\nPublishPort=24443:24443\n[Install]\nWantedBy=default.target\n')
+    host_mapping = f'AddHost={mapping}\n' if mapping else ''
+    lab.write(units,'lab-observability.pod',f'[Pod]\nPodName=lab-observability\n{host_mapping}PublishPort=8443:8443\nPublishPort={private_ip}:24443:24443\n[Install]\nWantedBy=default.target\n')
     components={
         'auth':('oauth.cfg','--config=/lab/oauth.cfg','256M',None),
         'perses':('perses.yaml','--config=/lab/perses.yaml','512M','/perses'),
@@ -92,7 +111,10 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--issuer',required=True)
     parser.add_argument('--observability',required=True)
+    parser.add_argument('--private-ip',required=True,help='private interface address for mTLS ingestion')
     parser.add_argument('--client-secret-file',type=Path,required=True)
+    parser.add_argument('--issuer-name',help='canonical issuer DNS name; requires --issuer-private-ip')
+    parser.add_argument('--issuer-private-ip',help='RFC1918 issuer address for server backchannels')
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args()
     info=args.client_secret_file.lstat()
@@ -100,7 +122,8 @@ def main():
         parser.error('client secret must be a private regular file')
     with args.client_secret_file.open() as source:secret=source.read(4097).strip()
     args.output.mkdir(parents=True,exist_ok=True,mode=0o700)
-    configure(args.output,args.issuer,args.observability,secret)
+    configure(args.output,args.issuer,args.observability,secret,args.private_ip,
+              issuer_name=args.issuer_name,issuer_private_ip=args.issuer_private_ip)
     print('Private observability inputs prepared; no services started.')
 
 if __name__=='__main__':main()

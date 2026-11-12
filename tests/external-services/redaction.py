@@ -2,6 +2,7 @@
 """Black-box collector privacy regression with synthetic sentinel data only."""
 import importlib.util
 import argparse
+import gzip
 import json
 from pathlib import Path
 import ssl
@@ -74,7 +75,7 @@ def main(host_sample=None):
     def run(*args,**kwargs):
         return subprocess.run(['podman',*args],check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,**kwargs).stdout
     with tempfile.TemporaryDirectory(prefix='enmaas-redaction-') as temporary:
-        root=Path(temporary);obs.configure(root,'127.0.0.1','127.0.0.1','synthetic-client-secret-1234')
+        root=Path(temporary);obs.configure(root,'127.0.0.1','127.0.0.1','synthetic-client-secret-1234','10.0.0.12')
         obs.lab.issue_certificates(root)
         config=yaml.safe_load((root/'collector.yaml').read_text())
         config['receivers']['otlp']['protocols']['http']['tls']['client_ca_file']='/lab/ca.pem'
@@ -101,6 +102,25 @@ def main(host_sample=None):
                 except urllib.error.HTTPError:break
                 except OSError:time.sleep(.2)
             else:raise RuntimeError('collector did not start')
+            # Valid JSON larger than the deployment's 4 MiB request bound. Test
+            # both wire-size rejection and decompressed-size rejection.
+            oversized=json.loads(json.dumps(data['logs']))
+            oversized['resourceLogs'][0]['scopeLogs'][0]['logRecords'][0]['body']={'stringValue':'x'*(4*1024*1024)}
+            encoded=json.dumps(oversized).encode()
+            for compressed in (False,True):
+                headers={'Content-Type':'application/json'}
+                body=encoded
+                if compressed:
+                    body=gzip.compress(body);headers['Content-Encoding']='gzip'
+                request=urllib.request.Request(origin+'/v1/logs',data=body,headers=headers)
+                try:
+                    with urllib.request.urlopen(request,context=ctx,timeout=10):
+                        raise RuntimeError('oversized telemetry request accepted')
+                except urllib.error.HTTPError as error:
+                    detail=error.read(8192).decode(errors='replace').lower()
+                    if error.code not in (400,413) or 'too large' not in detail:
+                        raise RuntimeError('oversized request did not receive explicit size rejection') from None
+                print('PASS: oversized '+('gzip' if compressed else 'plain')+' telemetry body rejected')
             for signal,payload in data.items():
                 request=urllib.request.Request(origin+'/v1/'+signal,data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'})
                 with urllib.request.urlopen(request,context=ctx,timeout=5) as response:

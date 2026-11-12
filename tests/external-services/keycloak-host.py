@@ -11,6 +11,8 @@ import tempfile
 HERE=Path(__file__).resolve().parent
 spec=importlib.util.spec_from_file_location('local_lab',HERE/'local.py')
 lab=importlib.util.module_from_spec(spec);spec.loader.exec_module(lab)
+spec=importlib.util.spec_from_file_location('issuer_identity',HERE/'issuer-config.py')
+identity=importlib.util.module_from_spec(spec);spec.loader.exec_module(identity)
 PRAXIS='quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8'
 
 
@@ -19,8 +21,9 @@ def address(value):
     except ValueError:raise ValueError('the test lab requires explicit IPv4 addresses') from None
 
 
-def configure(root,issuer,gateway,observability):
+def configure(root,issuer,gateway,observability,*,issuer_name=None,issuer_private_ip=None):
     issuer,gateway,observability=map(address,(issuer,gateway,observability))
+    issuer,mapping=identity.resolve(issuer,issuer_name,issuer_private_ip)
     if any(root.iterdir()):raise FileExistsError('use a new empty private output directory')
     root.chmod(0o700)
     # Reuse the tested realm/identity generator; only copy issuer-owned inputs.
@@ -58,7 +61,8 @@ bootstrap-admin-password={credentials['bootstrap_admin']}
 ''')
     lab.write(root,'gateway-oidc.json',{'issuer_url':f'https://{issuer}:8443/realms/enmaas-lab',
         'client_id':'enmaas-mini','client_secret':credentials['gateway_oidc'],
-        'ca_file':'/root/enmaas-inputs/issuer-ca.pem'})
+        'ca_file':'/root/enmaas-inputs/issuer-ca.pem',
+        **({'issuer_private_ip':mapping.split(':',1)[1]} if mapping else {})})
     proxy={'admin':{'address':'127.0.0.1:9901'},
         'insecure_options':{'allow_private_endpoints':True,'allow_private_upstreams':True},
         'listeners':[{'name':'issuer','address':'0.0.0.0:8443','filter_chains':['issuer'],
@@ -101,10 +105,13 @@ Exec=-c /etc/praxis/config.json
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ('issuer','gateway','observability'):parser.add_argument('--'+name,required=True)
+    parser.add_argument('--issuer-name',help='canonical issuer DNS name; requires --issuer-private-ip')
+    parser.add_argument('--issuer-private-ip',help='RFC1918 issuer address for server backchannels')
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args()
     args.output.mkdir(mode=0o700,parents=True,exist_ok=True)
-    configure(args.output,args.issuer,args.gateway,args.observability)
+    configure(args.output,args.issuer,args.gateway,args.observability,
+              issuer_name=args.issuer_name,issuer_private_ip=args.issuer_private_ip)
     print('Private issuer inputs prepared; no services started. Import a matching TLS certificate before installation.')
 
 if __name__=='__main__':main()

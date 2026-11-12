@@ -3,10 +3,11 @@
 import argparse
 from contextlib import contextmanager
 import datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import fcntl
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import subprocess
@@ -27,11 +28,15 @@ bench=load('benchmark.py','local_benchmark_core')
 lab=fixture.lab
 signals=load('signals.py','benchmark_signals')
 
+class SafetyStop(RuntimeError):
+    """Fixed, nonsecret diagnostics that can be shown without private reports."""
+
 class LocalController:
     save=bench.RhelController.save
     sample_due=bench.RhelController.sample_due
 
-    def __init__(self,image):
+    def __init__(self,image,model=None):
+        self.model=model or 'fixture';self.request_cost=Decimal('0.000008')
         self.image=image;self.original=None;self.lock=None;self.callers=[];self.created=[];self.secrets=[]
         self.telemetry=False;self.service_name='enmaas-gateway'
         self.name='lab-run-'+uuid.uuid4().hex
@@ -74,14 +79,33 @@ class LocalController:
         lab.write(self.output,'management',values['MANAGEMENT_API_SECRET'])
         for suffix,path in [('management',self.output/'management'),('client',HERE/'management-client.py')]:
             name=self.name+'-'+suffix;fixture.secret(name,path);self.secrets.append(name)
-        self.api('prices',{'model':'fixture','provider':'vllm','input_cost_per_mtok':1,'output_cost_per_mtok':2,
-                           'cache_write_cost_per_mtok':0,'cache_read_cost_per_mtok':0})
+        if (lab.STATE/'mock-profiles.json').exists():
+            from mock_profiles import configuration
+            document=configuration()
+            if json.loads((lab.STATE/'mock-profiles.json').read_text())!=document:
+                raise ValueError('Mock profile manifest differs from the reviewed fixture')
+            if self.model=='fixture':self.model=document['models'][0]['id']
+            selected=next((m for m in document['models'] if m['id']==self.model and 'openai' in m['apis']),None)
+            if selected is None:raise ValueError('Select an OpenAI-compatible mock alias')
+            upstream=selected['model']
+            if not re.fullmatch(r'[A-Za-z0-9_./-]+',upstream):raise ValueError('Invalid mock upstream ID')
+            query="SELECT input_cost_per_mtok,output_cost_per_mtok FROM model_pricing WHERE model='"+upstream+"';"
+            row=fixture.run('exec',lab.POD+'-db','psql','-U','keycloak','-d','metering_sso',
+                            '-At','-v','ON_ERROR_STOP=1','-c',query).decode().strip().split('|')
+            if len(row)!=2:raise ValueError('Mock model has no explicit imported price; select a priced model')
+            self.request_cost=((Decimal(row[0])*2+Decimal(row[1])*3)/1000000).quantize(Decimal('0.00000001'),rounding=ROUND_HALF_UP)
+            self.summary['model']=self.model
+            self.summary['expected_usd_per_request']=str(self.request_cost)
+        else:
+            if self.model!='fixture':raise ValueError('Legacy mock only serves fixture')
+            self.api('prices',{'model':'fixture','provider':'vllm','input_cost_per_mtok':1,'output_cost_per_mtok':2,
+                               'cache_write_cost_per_mtok':0,'cache_read_cost_per_mtok':0})
         for index in range(count):
             subject=self.name+'-'+str(index)
             self.created.append(subject) # Cleanup also covers a committed write whose reply was lost.
             self.api('users',{'subject':subject,'name':'Benchmark user','role':'user','active':True})
             self.api('budgets',{'subject':subject,'monthly_usd':10000})
-            key=self.api('keys',{'subject':subject,'name':'benchmark','expiresIn':'1h'},'POST')['key']
+            key=self.api('keys',{'subject':subject,'name':'benchmark','expiresIn':'2h'},'POST')['key']
             self.callers.append((subject,key));self.summary['completed_mock_requests'][subject]=0
         self.save()
 
@@ -112,11 +136,22 @@ class LocalController:
         memory={line.split(':')[0]:int(line.split()[1]) for line in memory_text.splitlines()
                 if line.startswith(('MemTotal:','MemAvailable:'))}
         if memory['MemAvailable']<memory['MemTotal']*.1:
-            raise RuntimeError('Local Linux host memory safety threshold reached')
+            raise SafetyStop('Local Linux host memory safety threshold reached: require at least 10% available')
+        if Path('/proc/meminfo').exists():
+            disk=os.statvfs('/var')
+            available,total=disk.f_bavail,disk.f_blocks
+        else:
+            raw=subprocess.run(['podman','machine','ssh','df','-Pk','/var'],
+                check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=10).stdout.decode()
+            fields=raw.splitlines()[-1].split()
+            if len(fields)!=6:raise RuntimeError('Cannot determine local VM disk capacity')
+            total,available=int(fields[1]),int(fields[3])
+        if total<=0 or available<total*.3:
+            raise SafetyStop('Local Linux host disk safety threshold reached: require at least 30% available')
         for suffix in ('gateway-sso','maas','metering-sso','provider','db'):
             info=json.loads(fixture.run('inspect',lab.POD+'-'+suffix))[0]
             if not info['State']['Running'] or info['State'].get('OOMKilled'):
-                raise RuntimeError('Fixture service stopped or exceeded memory')
+                raise SafetyStop('Fixture service stopped or exceeded memory')
 
     def observe(self):
         self.guard()
@@ -129,7 +164,7 @@ class LocalController:
     @contextmanager
     def transport(self):
         with bench.transport.MockTransport('https://localhost:28443',lab.STATE/'ca.pem',
-                [key for _,key in self.callers],'fixture') as request:yield request
+                [key for _,key in self.callers],self.model) as request:yield request
 
     def persist(self,phase,result):
         bench.RhelController.persist(self,phase,result)
@@ -158,7 +193,7 @@ class LocalController:
             for _ in range(30):
                 fields=fixture.run('exec',lab.POD+'-db','psql','-U','keycloak','-d','metering_sso',
                     '-At','-v','ON_ERROR_STOP=1','-c',query).decode().strip().split('|')
-                if tuple(map(int,fields[:4]))==(count,2*count,3*count,count) and Decimal(fields[4])==Decimal('0.000008')*count:break
+                if tuple(map(int,fields[:4]))==(count,2*count,3*count,count) and Decimal(fields[4])==self.request_cost*count:break
                 time.sleep(1)
             else:return False
         self.summary['ledger_verified']=True;self.save();return True
@@ -185,16 +220,19 @@ class LocalController:
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--praxis-image',required=True)
+    parser.add_argument('--model',help='Configured mock alias; default first mock profile model or legacy fixture')
     parser.add_argument('--duration',type=int,default=600)
     parser.add_argument('--offered-rps',type=float,default=30)
     args=parser.parse_args();os.umask(0o077)
     stop=threading.Event()
     for number in (signal.SIGINT,signal.SIGTERM):signal.signal(number,lambda *_:stop.set())
     plan=json.loads((HERE/'traffic-patterns.json').read_text())
-    controller=LocalController(args.praxis_image)
+    controller=LocalController(args.praxis_image,args.model)
+    controller.guard() # Check capacity before creating users or changing gateway policy.
     bench.run_plan(controller,plan,duration=args.duration,offered_rps=args.offered_rps,stop=stop)
     print('PASS: six phases, exact ledger/USD reconciliation and cleanup; private report: '+str(controller.output))
 
 if __name__=='__main__':
     try:main()
+    except SafetyStop as error:raise SystemExit(str(error)) from None
     except Exception as error:raise SystemExit(type(error).__name__+': local benchmark failed; inspect private reports') from None

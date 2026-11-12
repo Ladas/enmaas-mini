@@ -29,10 +29,25 @@ url=json.loads((Path(sys.argv[1])/'gateway-oidc.json').read_text())['issuer_url'
 print(urllib.parse.urlsplit(url).hostname)
 PYCODE
 )"
-openssl x509 -in "$cert" -noout -checkip "$issuer_ip" >/dev/null
+if python3 - "$issuer_ip" <<'PYADDRESS'
+import ipaddress,sys
+try: ipaddress.IPv4Address(sys.argv[1])
+except ValueError: raise SystemExit(1)
+PYADDRESS
+then
+  openssl x509 -in "$cert" -noout -checkip "$issuer_ip" >/dev/null
+else
+  openssl x509 -in "$cert" -noout -checkhost "$issuer_ip" >/dev/null
+fi
 openssl x509 -in "$cert" -noout -checkhost localhost >/dev/null
 [[ ! -e /etc/enmaas-keycloak-lab ]] || die 'existing lab installation; inspect it instead of overwriting credentials'
 dnf install -y podman python3 python3-pyyaml openssl firewalld shadow-utils policycoreutils-python-utils >/dev/null
+systemctl enable --now firewalld >/dev/null
+firewall_args=()
+for source in "$@"; do
+  firewall_args+=(--allow-rule "rule family=ipv4 source address=${source} port port=8443 protocol=tcp accept")
+done
+python3 "${HERE}/firewall-preflight.py" "${firewall_args[@]}"
 "${ROOT}/scripts/common/install" --prepare
 # Pull for the host architecture and refuse an emulated/cached incompatible image.
 arch="$(oci_architecture "$(uname -m)")"
@@ -70,12 +85,12 @@ create_secret lab-server-cert "$cert"
 create_secret lab-server-key "$key"
 for unit in "${inputs}"/quadlets/*; do install -m 0644 "$unit" "${units}/$(basename "$unit")"; done
 as_service systemctl --user daemon-reload
-systemctl enable --now firewalld >/dev/null
 for source in "$@"; do
   rule="rule family=ipv4 source address=${source} port port=8443 protocol=tcp accept"
   firewall-cmd --permanent --add-rich-rule="$rule" >/dev/null
   firewall-cmd --add-rich-rule="$rule" >/dev/null
 done
+python3 "${HERE}/firewall-preflight.py" "${firewall_args[@]}"
 as_service systemctl --user start lab-keycloak-proxy.service
 printf 'Services started. Verify issuer discovery, public admin denial and restart behavior before using the lab.\n'
 printf 'Private management: SSH to this host; Keycloak administration HTTPS binds to 127.0.0.1:18443 only.\n'

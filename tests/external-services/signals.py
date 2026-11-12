@@ -34,21 +34,21 @@ def main():
     now = time.time_ns()
     trace = secrets.token_hex(16)
     marker = 'enmaas-local-'+secrets.token_hex(8)
-    resource = {'attributes': [{'key': 'service.name', 'value': {'stringValue': 'enmaas-local-test'}}]}
+    resource = {'attributes': [{'key': 'service.name', 'value': {'stringValue': marker}}]}
     send('metrics', {'resourceMetrics': [{'resource': resource, 'scopeMetrics': [{'metrics': [{
         'name': 'enmaas_lab_requests', 'sum': {'aggregationTemporality': 2, 'isMonotonic': True,
         'dataPoints': [{'asInt': '1', 'timeUnixNano': str(now)}]}}]}]}]})
     send('logs', {'resourceLogs': [{'resource': resource, 'scopeLogs': [{'logRecords': [{
-        'timeUnixNano': str(now), 'body': {'stringValue': marker}, 'attributes': [
+        'timeUnixNano': str(now), 'body': {'stringValue': 'SENTINEL_MUST_BE_REMOVED'}, 'attributes': [
             {'key': 'authorization', 'value': {'stringValue': 'SENTINEL_MUST_BE_REMOVED'}}]}]}]}]})
     send('traces', {'resourceSpans': [{'resource': resource, 'scopeSpans': [{'spans': [{
-        'traceId': trace, 'spanId': secrets.token_hex(8), 'name': marker, 'kind': 2,
+        'traceId': trace, 'spanId': secrets.token_hex(8), 'name': 'SENTINEL_MUST_BE_REMOVED', 'kind': 2,
         'startTimeUnixNano': str(now), 'endTimeUnixNano': str(now+1_000_000), 'attributes': [
             {'key': 'authorization', 'value': {'stringValue': 'SENTINEL_MUST_BE_REMOVED'}}]}]}]}]})
     urls = {
-        'metrics': 'http://localhost:9090/api/v1/query?'+urllib.parse.urlencode({'query':'enmaas_lab_requests_total'}),
+        'metrics': 'http://localhost:9090/api/v1/query?'+urllib.parse.urlencode({'query':'enmaas_lab_requests_total{exported_job="'+marker+'"}'}),
         'logs': 'http://localhost:3100/loki/api/v1/query_range?'+urllib.parse.urlencode({
-            'query': '{service_name="enmaas-local-test"} |= "'+marker+'"', 'start':str(now-1_000_000_000)}),
+            'query': '{service_name="'+marker+'"}', 'start':str(now-1_000_000_000)}),
         'traces': f'http://localhost:3200/api/traces/{trace}',
     }
     for signal, url in urls.items():

@@ -20,11 +20,16 @@ From the repository on the observation host:
 sudo python3 tests/external-services/observability-host.py \
   --issuer "$KEYCLOAK_HOST_IP" \
   --observability "$OBSERVABILITY_HOST_IP" \
+  --private-ip "$OBSERVABILITY_PRIVATE_IP" \
   --client-secret-file /root/enmaas-inputs/observability-client-secret \
   --output /root/enmaas-observability-inputs
 ```
 
-Supply a server certificate covering the observation IP, its private key, the public issuer CA, and a dedicated public telemetry client CA. The telemetry CA should authorize only gateway collectors. Keep CA signing keys on the workstation; do not deploy them to either service host.
+Supply a server certificate covering both the public observation IP and its private IP, its private key, the public issuer CA, and a dedicated public telemetry client CA. The telemetry CA should authorize only gateway collectors. Keep CA signing keys on the workstation; do not deploy them to either service host.
+
+For a DNS issuer with private peer connections, follow the optional
+[private issuer resolution](oidc.md#private-issuer-resolution)
+configuration before generating inputs. Keep both clients on the same issuer name.
 
 ## Install
 
@@ -38,7 +43,7 @@ sudo tests/external-services/install-observability \
   "$OBSERVABILITY_HOST_IP" "$GATEWAY_SOURCE_CIDR" "$WORKSTATION_CIDR"
 ```
 
-The final argument accepts additional browser source CIDRs. TCP 8443 is permitted from those sources; TCP 24443 is permitted only from the gateway source. Matching AWS security-group rules are still required. The script does not change AWS resources.
+The final argument accepts additional browser source CIDRs. TCP 8443 is permitted from those sources; TCP 24443 binds only the configured private interface and is permitted only from the gateway private source address. Set `GATEWAY_SOURCE_CIDR` to the gateway private IP followed by `/32`. Matching AWS security-group rules are still required. The script does not change AWS resources. On EC2, public-IP traffic is translated to the private interface, so the private bind alone does not block public traffic: the source-restricted security group and host firewall are both required.
 
 ## Services and access
 
@@ -67,8 +72,35 @@ python3 tests/external-services/redaction.py
 
 It starts a temporary mTLS collector, exports only synthetic test data to private temporary files, asserts redaction and removes its container/secrets afterward. No cloud resources or real provider credentials are used.
 
+New receiver configurations set a **4 MiB HTTP request-body limit** and a maximum
+export batch of **512 records**. The regression verifies explicit rejection of
+oversized plain and gzip-compressed requests, then successful export of normal
+logs, traces and metrics. The request limit applies before privacy transforms;
+it is separate from record-count batching and container memory limits.
+
+These bounds do not limit the number of distinct metric names or label values a
+trusted producer can send over time. Per-producer identity enforcement,
+cardinality controls, store disk limits and long-outage behavior remain separate
+qualification gaps. Existing running collectors need regenerated configuration
+and a controlled restart to receive these settings.
+
 The initial dashboard verifies transport with a synthetic metric. Dedicated gateway traffic, host-resource, trace-detail and sanitized-log dashboards pass local browser tests with actual emitted signals. Imported reference dashboards are not automatically qualified, and benchmark phase markers are not yet integrated into Perses. These local results do not qualify the separate RHEL host installation.
 
 Before RHEL acceptance, repeat the locally tested persona logins, existing-session group revocation, client-certificate rejection and backend access denials. Also qualify collector restart/drop behavior, retention deletion and disk growth. Loki and Tempo currently have time retention but no tested disk quota.
 
 The configuration uses OpenTelemetry's [transform processor](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.165.0/processor/transformprocessor/README.md). Test the pinned version rather than assuming newer documentation describes the deployed behavior.
+
+## Existing firewall configuration
+
+Before creating service secrets, the installer audits runtime and permanent
+firewalld rules. It repeats the audit before starting services. Extra ports,
+services, unreviewed policies, direct rules and broader rich rules stop the
+installation. Existing rules are never removed automatically. The standard
+IPv6 host policy is accepted only with its reviewed ICMPv6 behavior; SSH and
+DHCPv6 service definitions are checked rather than trusted by name.
+
+If the audit stops, review the named configuration on the dedicated VM before
+retrying. Do not disable firewalld or remove the IPv6 policy to bypass the check.
+This audit does not cover independently installed nftables rules or replace AWS
+security-group checks and external packet-level deny probes. Its live RHEL
+qualification is still pending.

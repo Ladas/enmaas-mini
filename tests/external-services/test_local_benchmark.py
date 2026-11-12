@@ -10,6 +10,14 @@ spec=importlib.util.spec_from_file_location('local_benchmark',Path(__file__).wit
 module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
 
 class LocalBenchmark(unittest.TestCase):
+    def test_failed_preflight_never_provisions_users_or_changes_policies(self):
+        with patch('sys.argv', ['local-benchmark.py', '--praxis-image', 'fixture-image']), \
+                patch.object(module.os, 'umask'), patch.object(module.signal, 'signal'), \
+                patch.object(module.LocalController, 'guard', side_effect=module.SafetyStop('capacity')), \
+                patch.object(module.bench, 'run_plan') as run:
+            with self.assertRaises(module.SafetyStop):module.main()
+            run.assert_not_called()
+
     def test_cleanup_attempts_all_retirements_and_restoration(self):
         controller=module.LocalController('fixture-image')
         controller.created=['lab-run-test-0','lab-run-test-1'];controller.original=b'{}'
@@ -57,6 +65,15 @@ class LocalBenchmark(unittest.TestCase):
         with patch.object(module.Path,'exists',return_value=False), patch.object(module.subprocess,'run') as command, patch.object(module.fixture,'run') as inspect:
             command.return_value.stdout=b'MemTotal: 1000 kB\nMemAvailable: 99 kB\n'
             with self.assertRaises(RuntimeError):controller.guard()
+            inspect.assert_not_called()
+
+    def test_low_vm_disk_stops_before_container_inspection(self):
+        controller=module.LocalController('fixture-image')
+        from types import SimpleNamespace
+        with patch.object(module.Path,'exists',return_value=False), patch.object(module.subprocess,'run',side_effect=[
+                SimpleNamespace(stdout=b'MemTotal: 1000 kB\nMemAvailable: 900 kB\n'),
+                SimpleNamespace(stdout=b'Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/test 1000 800 200 80% /var\n')]), patch.object(module.fixture,'run') as inspect:
+            with self.assertRaisesRegex(RuntimeError, 'disk safety'):controller.guard()
             inspect.assert_not_called()
 
     def test_ledger_requires_exact_cost_and_every_subject(self):

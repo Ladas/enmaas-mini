@@ -18,7 +18,7 @@ def main():
     parser.add_argument('--samples',type=int,default=5)
     parser.add_argument('--interval',type=int,default=15)
     args=parser.parse_args()
-    if not 2<=args.samples<=40 or not 1<=args.interval<=30:parser.error('Use 2–40 samples at 1–30 seconds')
+    if not 2<=args.samples<=240 or not 1<=args.interval<=30:parser.error('Use 2–240 samples at 1–30 seconds')
     pod=signals.lab.POD
     result=subprocess.run(['podman','pod','inspect',pod],capture_output=True,text=True,check=True,timeout=10)
     if json.loads(result.stdout)[0]['Labels'].get('io.enmaas.test-lab')!=signals.lab.INSTANCE:

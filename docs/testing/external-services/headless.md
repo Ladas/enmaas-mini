@@ -1,6 +1,6 @@
 # Headless lab installation
 
-Provision the hosts from the [AWS lab helper](README.md#provision-the-three-vms), then apply [peer rules](network.md), distribute [certificates](certificates.md), and prepare the [issuer](keycloak-rhel.md) and [observability](observability-rhel.md). Their installers take explicit arguments and have no menus. AWS launch/RDS confirmations remain separate administrator operations.
+Provision the hosts from the [separate AWS lab guide](aws.md), then apply [peer rules](network.md), distribute [certificates](certificates.md), and prepare the [issuer](keycloak-rhel.md) and [observability](observability-rhel.md). Their installers take explicit arguments and have no menus. The observability generator requires both its public address and `--private-ip`; use the private IP printed by `aws_lab_info`. Its server certificate must cover both addresses. AWS launch/RDS confirmations remain separate administrator operations.
 
 Run application installation **on the gateway**, from the reviewed checkout. `--non-interactive` disables prompts even when a terminal is attached. Missing choices or credential-file paths fail before installation. `--yes` explicitly authorizes the installation; it does not supply missing credentials.
 
@@ -11,7 +11,7 @@ Set the gateway address and use the root-private OIDC file transferred by the is
 ```sh
 export GATEWAY_HOST_IP='REPLACE_WITH_GATEWAY_PUBLIC_IPV4'
 sudo python3 scripts/pricetag/install.py \
-  --non-interactive --yes --mode mock \
+  --non-interactive --yes --mode mock --mock-profiles \
   --hostname "$GATEWAY_HOST_IP" --no-sample-users --monthly-usd 5 \
   --image-mode source \
   --maas-revision 6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d \
@@ -20,7 +20,7 @@ sudo python3 scripts/pricetag/install.py \
   --oidc-config /root/enmaas-inputs/oidc.json
 ```
 
-An SSH-created administrator remains available for recovery. OIDC identities are provisioned separately using the issuer UUIDs and the [identity helper](oidc.md#provision-an-identity-without-sql). Do not create duplicate Alice/Bob identities with unrelated UUIDs. The benchmark provisions and retires its own test users.
+This selects replaceable `openai`/`external` mock profiles; see [provider management](providers.md). An SSH-created administrator remains available for recovery. OIDC identities are provisioned separately using the issuer UUIDs and the [identity helper](oidc.md#provision-an-identity-without-sql). Do not create duplicate Alice/Bob identities with unrelated UUIDs. The benchmark provisions and retires its own test users.
 
 ## Real providers
 
@@ -54,3 +54,22 @@ Connect the gateway with the explicit [telemetry generator and installer](gatewa
 Service installers do not create AWS infrastructure and do not need AWS credentials. AWS deletion is an administrator operation using the [cleanup inventory](cleanup.md). No installation command automatically deletes existing application state or recovers a partial installation by overwriting credentials.
 
 The headless parser and local source build are tested. Fresh RHEL installation, firewall/SELinux/reboot, inter-host networking and actual RDS acceptance remain pending supplied infrastructure.
+
+## Interactive gateway installation
+
+The issuer and observability steps above still run with explicit arguments. Once
+their inputs and the gateway certificate bundle are in place, run on the gateway
+with an attached terminal:
+
+```sh
+sudo scripts/pricetag/install --hostname "$GATEWAY_HOST_IP" \
+  --mode mock --mock-profiles --image-mode source --no-sample-users \
+  --maas-revision 6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d \
+  --metering-revision 2281e1a84bfc3b998e7db36bc01bae88130bfcdd \
+  --tls-bundle /root/enmaas-tls --oidc-config /root/enmaas-inputs/oidc.json
+```
+
+This asks for final confirmation. Mock mode needs no real provider keys. For real
+providers, use `--mode real` instead of the two mock flags and let the gateway
+installer prompt for providers and credentials. Do not run the mock-only benchmark
+after configuring real providers. This is not an upgrade command.

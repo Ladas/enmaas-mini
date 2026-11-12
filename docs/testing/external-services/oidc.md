@@ -93,3 +93,74 @@ Use a new output path for each operation. Keep the initial SSH-created administr
 Source builds use [PriceTag commit 2281e1a](https://github.com/Ladas/pricetag-metering/commit/2281e1a84bfc3b998e7db36bc01bae88130bfcdd), which permits the configured HTTPS issuer origin in the logout confirmation form policy. Same-origin POST validation and same-origin-only impersonation forms remain in place. Current-role changes, confirmed logout and bounded observability-session expiry passed local browser qualification with this change.
 
 Use `--image-mode source` for this lab. The published-image mode still points to the earlier image and is not qualified for this OIDC lifecycle. RHEL acceptance remains separate.
+
+## Private issuer resolution
+
+**RHEL qualification is pending.**
+
+The gateway's protected OIDC JSON accepts an optional `issuer_private_ip`:
+
+```json
+{
+  "issuer_url": "https://identity.lab.example.com:8443/realms/enmaas-lab",
+  "issuer_private_ip": "10.0.0.11",
+  "client_id": "enmaas-mini",
+  "client_secret": "REPLACE-IN-PROTECTED-FILE",
+  "ca_file": "/root/enmaas-inputs/issuer-ca.pem"
+}
+```
+
+Preparation adds an exact issuer-name/private-IP mapping to the PriceTag Metering
+container using Quadlet `AddHost`. The issuer URL, TLS hostname verification and
+OIDC issuer validation remain unchanged. Only RFC1918 IPv4 destinations and an
+explicit DNS issuer name are accepted. This is not a generic DNS override and
+does not modify the host or browser's resolver.
+
+Use the same DNS/private-IP pair on both hosts. On the Keycloak host:
+
+```sh
+sudo python3 tests/external-services/keycloak-host.py \
+  --issuer "$KEYCLOAK_HOST_IP" --gateway "$GATEWAY_HOST_IP" \
+  --observability "$OBSERVABILITY_HOST_IP" \
+  --issuer-name "$KEYCLOAK_DNS_NAME" --issuer-private-ip "$KEYCLOAK_PRIVATE_IP" \
+  --output /root/enmaas-keycloak-inputs
+```
+
+On the observability host, after transferring its protected client secret:
+
+```sh
+sudo python3 tests/external-services/observability-host.py \
+  --issuer "$KEYCLOAK_HOST_IP" --observability "$OBSERVABILITY_HOST_IP" \
+  --private-ip "$OBSERVABILITY_PRIVATE_IP" \
+  --issuer-name "$KEYCLOAK_DNS_NAME" --issuer-private-ip "$KEYCLOAK_PRIVATE_IP" \
+  --client-secret-file /root/enmaas-inputs/observability-client-secret \
+  --output /root/enmaas-observability-inputs
+```
+
+Use new output directories; existing inputs are not overwritten. Keycloak uses the
+canonical DNS issuer and produces the gateway JSON with the private address.
+Observability keeps that same issuer URL and adds the mapping to its pod. The
+Keycloak installer checks the certificate against the issuer DNS name; `localhost`
+remains required for loopback administration.
+
+Before installing, create public browser DNS for that name, generate its matching
+certificate with `--keycloak-name`, and allow private TCP 8443 from both client
+nodes using the [private peer-rule mode](network.md#dns-issuer-with-private-peer-traffic).
+Pass their private `/32` addresses to the Keycloak host-firewall installer;
+the workstation browser source stays unchanged.
+The existing `--issuer` argument still takes the public IP. Gateway and
+observability browser callbacks can continue to use their IP addresses.
+
+Generator tests, a local Linux Quadlet dry run and isolated private-network
+hostname TLS checks pass. The pinned Keycloak discovery test also confirms that
+protocol URLs retain the canonical DNS issuer. Form login, PKCE exchange,
+authenticated userinfo and code-replay/wrong-verifier rejection pass for all three
+fixture users with both clients over the private mapping. These tests do not
+establish application session behavior on separate hosts. The pinned OAuth2 Proxy
+also passed private-mapping administrator-session acceptance, member/manager denial
+and forged-header rejection using a static protected response. PriceTag sessions
+with private resolution, browser cookie behavior and complete three-host OIDC,
+private routing and RHEL verification remain pending. Changing the private IP
+requires regenerating and restarting affected client units; it is not automatic
+service discovery. Private mappings do not replace SG/firewall rules or establish
+public certificate trust.
