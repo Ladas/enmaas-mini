@@ -16,6 +16,8 @@ import unicodedata
 from urllib.parse import parse_qsl, quote, unquote, urlsplit, urlunsplit
 
 from gateway import render
+from oidc_config import load as load_oidc
+from tls_bundle import validate as validate_tls_bundle
 
 ROOT = Path(__file__).resolve().parents[2]
 POSTGRES = 'docker.io/library/postgres@sha256:996e9dc583ba9f0265a2c75547a9c95fb22c251e394749cab205a0a00e1856a1'
@@ -238,6 +240,8 @@ def main():
                         help='private file containing a URL to the existing external metering database')
     parser.add_argument('--external-database-ca-file', type=Path,
                         help='CA certificate used when the external URL sets sslmode=verify-full')
+    parser.add_argument('--tls-bundle', type=Path, help='pre-issued server.pem, server.key and ca.pem; never a CA signing key')
+    parser.add_argument('--oidc-config', type=Path, help='private root-owned JSON for optional external browser SSO')
     parser.add_argument('--price-sources', type=Path, required=True,
                         help='JSON mapping gateway aliases to reviewed PriceTag pricing model IDs')
     parser.add_argument('--directory', type=Path, default=Path('/etc/praxis-pricetag'))
@@ -265,6 +269,8 @@ def main():
             parser.error('--external-database-ca-file must be an absolute path')
     elif args.external_database_ca_file is not None:
         parser.error('--external-database-ca-file requires both external database URL files')
+    tls_files = validate_tls_bundle(args.tls_bundle, args.hostname) if args.tls_bundle else None
+    oidc_env, oidc_ca = load_oidc(args.oidc_config, f'https://{args.hostname}:8443') if args.oidc_config else ({}, None)
     for directory in (args.directory, args.admin_directory):
         if not directory.is_absolute() or re.search(r'[\s%]', str(directory)) or directory.exists():
             parser.error('use new absolute directories without whitespace or percent signs')
@@ -315,8 +321,13 @@ def main():
     def credentials(*options):
         subprocess.run([str(credential), *map(str, options)], check=True, stdout=subprocess.DEVNULL)
 
-    credentials('lab-tls', '--directory', args.admin_directory / 'tls', '--hostname', args.hostname,
-                '--alt-hostname', 'localhost', '--alt-hostname', '127.0.0.1')
+    if tls_files is None:
+        credentials('lab-tls', '--directory', args.admin_directory / 'tls', '--hostname', args.hostname,
+                    '--alt-hostname', 'localhost', '--alt-hostname', '127.0.0.1')
+    else:
+        (args.admin_directory / 'tls').mkdir(mode=0o700)
+        for source, target in (('server.pem', 'server.pem'), ('server.key', 'server-key.pem'), ('ca.pem', 'ca.pem')):
+            shutil.copyfile(tls_files[source], args.admin_directory / 'tls' / target)
     for source, target in [(args.admin_directory / 'tls/server.pem', 'tls.pem'),
                            (args.admin_directory / 'tls/server-key.pem', 'tls-key.pem')]:
         shutil.copyfile(source, bundle / target)
@@ -352,6 +363,10 @@ def main():
         maas_url = external_application_url(maas_url, ca_configured)
     m2m_secret = secrets.token_urlsafe(48)
     management_secret = secrets.token_urlsafe(48)
+    if oidc_env:
+        partner_secret = secrets.token_urlsafe(48)
+        oidc_env['USER_MANAGEMENT_API_SECRET'] = partner_secret
+        (args.directory / 'partner-secret').write_text(partner_secret + '\n')
     metering_url = (metering_url if external_database else
                     f'postgres://metering:{metering_password}@pricetag-db:5432/metering?sslmode=disable')
     env('metering.env', {'DATABASE_URL': metering_url,
@@ -368,7 +383,9 @@ def main():
         'KEY_SERVICE_GROUPS_HEADER': 'X-MaaS-Group',
         'PARTNER_USER_KEY_GROUP': 'system:authenticated',
         'SUPERADMIN_USERS': 'admin', 'MONTHLY_TOKEN_QUOTA': '10000000000', 'TZ': 'UTC',
-        'MAAS_VALIDATE_URL': 'http://pricetag-maas:8080/internal/v1/api-keys/validate'})
+        'MAAS_VALIDATE_URL': 'http://pricetag-maas:8080/internal/v1/api-keys/validate', **oidc_env})
+    if oidc_ca is not None:
+        shutil.copyfile(oidc_ca, args.directory / 'oidc-ca.pem')
     (args.directory / 'm2m-secret').write_text(m2m_secret + '\n')
     maas_url = (maas_url if external_database else
                 f'postgres://maas:{maas_password}@pricetag-db:5432/maas?sslmode=disable')
@@ -421,7 +438,8 @@ def main():
     container('pricetag-metering', 'PriceTag metering and dashboards', application_dependency,
         f'Image={args.metering_image}\nPull=never\nNetworkAlias=pricetag-metering\n'
         f'EnvironmentFile={args.directory}/metering.env\nPublishPort=127.0.0.1:18087:8080\n'
-        f'Volume={args.directory}/catalog:/etc/gateway-catalog:ro\n' + external_ca_mount + app, '2G',
+        f'Volume={args.directory}/catalog:/etc/gateway-catalog:ro\n' + external_ca_mount +
+        (f'Volume={args.directory}/oidc-ca.pem:/etc/pricetag-oidc-ca.pem:ro\n' if oidc_ca is not None else '') + app, '2G',
         network='pricetag.network:ip=10.77.0.12')
     dependencies = 'pricetag-metering.service'
     if args.mock_provider:
@@ -444,6 +462,8 @@ def main():
         os.chown(path, 0, owner.pw_gid)
         path.chmod(0o750 if path.is_dir() else 0o640)
     (args.directory / 'management-secret').chmod(0o600)
+    if oidc_env:
+        (args.directory / 'partner-secret').chmod(0o600)
     print(f'Prepared {args.directory}; no services started. Administrator credentials: {args.admin_directory}')
 
 

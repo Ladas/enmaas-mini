@@ -188,8 +188,8 @@ _aws_test_launch() {
     esac
   done
   case "$test_scenario" in
-    all-in-one|remote-gateway|vllm-server) ;;
-    *) _aws_test_error 'Supply --scenario all-in-one, remote-gateway or vllm-server; hardware presets do not choose the role.'; return 1 ;;
+    all-in-one|remote-gateway|vllm-server|keycloak|observability) ;;
+    *) _aws_test_error 'Supply --scenario all-in-one, remote-gateway, vllm-server, keycloak or observability; hardware presets do not choose the role.'; return 1 ;;
   esac
   case "$test_name" in
     all-in-one|remote-gateway|vllm-server)
@@ -243,7 +243,7 @@ aws_test_verify() {
     _aws_test_error "$test_name must be running with a public IP; wait and rerun verify."
     return 1
   }
-  test_scenario=$(printf '%s' "$test_info" | jq -er '.Scenario | select(. == "all-in-one" or . == "remote-gateway" or . == "vllm-server")') || return 1
+  test_scenario=$(printf '%s' "$test_info" | jq -er '.Scenario | select(. == "all-in-one" or . == "remote-gateway" or . == "vllm-server" or . == "keycloak" or . == "observability")') || return 1
   test_inference=$(printf '%s' "$test_info" | jq -er '.Inference | select(. == "cpu" or . == "gpu" or . == "none")') || return 1
   test_vpc=$(printf '%s' "$test_info" | jq -er '.VpcId | select(. != null)') || return 1
   RHEL_HOST="ec2-user@$test_ip"

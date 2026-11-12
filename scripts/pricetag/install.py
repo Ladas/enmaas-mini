@@ -20,15 +20,15 @@ ROOT = Path(__file__).resolve().parents[2]
 MAAS_COMMIT = '6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d'
 # Published image provenance remains separate from the source-build candidate.
 METERING_COMMIT = 'ce9c6c51b8dff178637003945b517255c54fc853'
-SOURCE_METERING_COMMIT = 'b1c5ce0e82b4bd63525a7eccd9ecd4d010e153d5'
+SOURCE_METERING_COMMIT = '2281e1a84bfc3b998e7db36bc01bae88130bfcdd'
 MAAS_REPO = 'https://github.com/Ladas/models-as-a-service.git'
 MAAS_BRANCH = 'feat/standalone-runtime-minimal'
 METERING_REPO = 'https://github.com/Ladas/pricetag-metering.git'
-METERING_BRANCH = 'feat/latest-upstream-standalone'
+METERING_BRANCH = 'fix/oidc-logout-form-policy'
 PRAXIS_IMAGE = 'quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8'
 PRAXIS_REVISION = '5667c4acecd0981ae5114cbbf2ee3dcccec9c248'
 MAAS_IMAGE = 'localhost/pricetag-maas:standalone'
-METERING_IMAGE = 'localhost/pricetag-metering:upstream-b1c5ce0'
+METERING_IMAGE = 'localhost/pricetag-metering:upstream-2281e1a'
 PUBLISHED_MAAS_IMAGE = 'quay.io/redhat-et/secure-single-server-maas-standalone@sha256:0bec6ef57fa5b10a7bef8f4df8d98f932c9d7fc96798f7bfc0cd77b504790fa8'
 PUBLISHED_METERING_IMAGE = 'quay.io/redhat-et/secure-single-server-pricetag-metering@sha256:dabb2f35f54c30c2c387b3bf298b66f3b84a4110ddf3a78a204c7d59c5de2f1a'
 CACHE = Path('/var/cache/pricetag-installer')
@@ -193,6 +193,8 @@ def parse_args(argv=None):
     p.add_argument('--pricetag-messages-url', help=argparse.SUPPRESS)
     p.add_argument('--pricetag-openai-url', help=argparse.SUPPRESS)
     p.add_argument('--monthly-usd', type=int, default=5, help='default per-user monthly USD allowance; default 5')
+    p.add_argument('--tls-bundle', type=Path, help='pre-issued server.pem, server.key and ca.pem')
+    p.add_argument('--oidc-config', type=Path, help='private JSON file for external OIDC login')
     p.add_argument('--maas-database-url-file', type=Path,
                    help='private URL file for the existing external maas database')
     p.add_argument('--metering-database-url-file', type=Path,
@@ -202,6 +204,7 @@ def parse_args(argv=None):
     p.add_argument('--sample-users', action=argparse.BooleanOptionalAction, default=None,
                    help='create Alice and Bob in addition to the required administrator')
     p.add_argument('--yes', action='store_true', help='skip final confirmation, not missing setup prompts')
+    p.add_argument('--non-interactive', action='store_true', help='never prompt; require complete options and protected credential files')
     p.add_argument('--plan', action='store_true', help='print stages without credentials, discovery or host changes')
     p.add_argument('--image-mode', choices=('source', 'published'), help='build source or pull digest-pinned images')
     p.add_argument('--maas-image', help='published MaaS image, including @sha256 digest')
@@ -213,7 +216,9 @@ def parse_args(argv=None):
     metering_source.add_argument('--metering-revision', help='full PriceTag source SHA to build or verify')
     metering_source.add_argument('--metering-branch', help='source mode: branch in the PriceTag source repository')
     args = p.parse_args(argv)
-    interactive = sys.stdin.isatty() and not args.plan
+    interactive = sys.stdin.isatty() and not args.plan and not args.non_interactive
+    if args.non_interactive and not args.plan and not args.yes:
+        p.error('--non-interactive requires --yes')
     if not args.hostname and interactive:
         args.hostname = input('Gateway public IPv4 or DNS name: ').strip()
     if not args.hostname or not valid_hostname(args.hostname):
@@ -268,7 +273,7 @@ def parse_args(argv=None):
         p.error('--external-api requires --provider external')
     if args.pricetag_key_file and not (args.pricetag_messages_url or args.pricetag_openai_url):
         p.error('--pricetag-key-file requires a PriceTag URL')
-    if not args.plan and not sys.stdin.isatty() and args.mode == 'real':
+    if not args.plan and (args.non_interactive or not sys.stdin.isatty()) and args.mode == 'real':
         if not args.yes:
             p.error('noninteractive installation requires --yes')
         if any(not getattr(args, provider + '_key_file') for provider in args.provider):
@@ -431,6 +436,14 @@ def install(args):
                                             args.external_database_ca_file)
         except (OSError, ValueError) as error:
             raise ValueError(str(error)) from None
+    if args.oidc_config is not None:
+        if args.metering_revision == 'ce9c6c51b8dff178637003945b517255c54fc853':
+            raise ValueError('This metering revision has no OIDC handler; select the tested source-build candidate')
+        from oidc_config import load as load_oidc
+        load_oidc(args.oidc_config, f'https://{args.hostname}:8443')
+    if args.tls_bundle is not None:
+        from tls_bundle import validate as validate_tls_bundle
+        validate_tls_bundle(args.tls_bundle, args.hostname)
     preflight(args.mode)
     helper = provider_module()
     stage(1, 'Validate provider setup')
@@ -472,6 +485,10 @@ def install(args):
                     '--metering-database-url-file', args.metering_database_url_file]
         if args.external_database_ca_file is not None:
             command += ['--external-database-ca-file', args.external_database_ca_file]
+    if args.oidc_config is not None:
+        command += ['--oidc-config', args.oidc_config]
+    if args.tls_bundle is not None:
+        command += ['--tls-bundle', args.tls_bundle]
     if not args.sample_users:
         command += ['--no-sample-users']
     if args.mode == 'mock':

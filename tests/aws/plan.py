@@ -356,6 +356,10 @@ class PlanTest(unittest.TestCase):
 
     def test_public_ssh_is_explicit_and_does_not_open_https_or_backends(self):
         for scenario in vm.SCENARIOS:
+            if scenario in vm.AUXILIARY:
+                with self.assertRaises(ValueError):
+                    vm.ingress(scenario, "192.0.2.1/32", ssh_access="public")
+                continue
             rules = vm.ingress(scenario, "192.0.2.1/32", ssh_access="public")
             self.assertEqual(rules[0]["IpRanges"], [{"CidrIp": "0.0.0.0/0"}])
             self.assertEqual([rule["FromPort"] for rule in rules],

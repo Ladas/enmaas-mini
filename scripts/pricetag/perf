@@ -154,13 +154,26 @@ def verify(args):
     if not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", args.database_name):
         raise ValueError("invalid database name")
     report = json.loads(args.report.read_text())
-    counts = {}
-    for phase in report['phases']:
-        for sample in phase['samples']:
-            subject = sample['subject']
-            if not re.fullmatch(r'perf-[a-z0-9-]{1,100}', subject):
-                raise ValueError('unexpected subject in report')
-            counts[subject] = counts.get(subject, 0) + int(sample['ok'])
+    if report.get('schema') == 'enmaas-mock-counts-v1':
+        # Duration-based runs keep bounded per-user counts instead of retaining
+        # every response in memory. The same independent ledger check applies.
+        counts = report.get('completed_mock_requests')
+        if not isinstance(counts, dict) or not 1 <= len(counts) <= 100:
+            raise ValueError('expected 1–100 mock user counts')
+        if any(not isinstance(subject, str) or not re.fullmatch(r'perf-[a-z0-9-]{1,100}', subject)
+               or type(count) is not int or not 0 <= count <= 100000000
+               for subject, count in counts.items()):
+            raise ValueError('invalid mock user count')
+    else:
+        counts = {}
+        for phase in report['phases']:
+            for sample in phase['samples']:
+                subject = sample['subject']
+                if not re.fullmatch(r'perf-[a-z0-9-]{1,100}', subject):
+                    raise ValueError('unexpected subject in report')
+                counts[subject] = counts.get(subject, 0) + int(sample['ok'])
+        if not counts:
+            raise ValueError('no mock subjects to reconcile')
     prefix = []
     if args.service_user:
         uid = subprocess.check_output(['id', '-u', args.service_user], text=True).strip()

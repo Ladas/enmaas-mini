@@ -28,6 +28,20 @@ class Load(unittest.TestCase):
             args.database_name='host=another-server'
             with self.assertRaises(ValueError):perf.verify(args)
 
+    def test_bounded_aggregate_report_reconciles_without_samples(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report=Path(directory)/'report.json'
+            report.write_text(json.dumps({'schema':'enmaas-mock-counts-v1',
+                                          'completed_mock_requests':{'perf-one':2,'perf-two':0}}))
+            args=SimpleNamespace(report=report,database_name='metering',database='test-db',service_user=None)
+            with patch.object(perf.subprocess,'check_output',return_value='perf-one|2|4|6|10\n'):
+                self.assertEqual(perf.verify(args),0)
+            for counts in ({"bad'identity":1}, {'perf-one':-1}, {'perf-one':True}, {}):
+                report.write_text(json.dumps({'schema':'enmaas-mock-counts-v1','completed_mock_requests':counts}))
+                with patch.object(perf.subprocess,'check_output') as query:
+                    with self.assertRaises(ValueError): perf.verify(args)
+                    query.assert_not_called()
+
     def test_multiple_streams_per_user_and_expected_throttling(self):
         class Reply:
             status=429
