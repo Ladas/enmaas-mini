@@ -74,7 +74,8 @@ def main():
             else:raise RuntimeError('Container log not delivered')
             if any(value[1]!='gateway event' for value in values):raise RuntimeError('Original log body survived')
             if len(values)!=phase+1:raise RuntimeError('Unexpected duplicate log delivery across restart')
-        lab.write(lab.STATE,'log-runtime-evidence.json',{'service':service,'records':3,'redacted':True,'restart_offsets':True,'truncation_resume':True})
+        lab.write(lab.STATE,'log-runtime-evidence.json',{'service':service,'records':3,'redacted':True,'restart_offsets':True,'truncation_resume':True,
+            'started_unix_ms':started//1_000_000,'ended_unix_ms':time.time_ns()//1_000_000})
         print('PASS: real Podman logs reach Loki without original text; restart and truncation preserve three events')
     finally:
         for container in reversed(containers):run(['rm','-f',container])

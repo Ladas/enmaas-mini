@@ -81,7 +81,7 @@ def main(image):
                     raise ValueError('Unexpected native usage contract')
                 counts[model['model']] = counts.get(model['model'], 0) + 1
                 checks.append({'alias': model['id'], 'api': api})
-        if not re.fullmatch(r'lab-run-[a-f0-9]{32}-0', subject):
+        if not re.fullmatch(r'lab-run-[a-f0-9]{32}-0@example\.test', subject):
             raise ValueError('Unexpected isolated test identity')
         for model, count in counts.items():
             query = ("SELECT count(*),coalesce(sum(prompt_tokens),0),coalesce(sum(completion_tokens),0),"

@@ -49,7 +49,7 @@ def private_json(path):
     return validate(json.loads(content))
 
 
-def provision(document):
+def partner_request(document, method, *, keys=False):
     if os.geteuid() != 0:
         raise ValueError('run with sudo on the gateway host')
     document = validate(document)
@@ -57,8 +57,8 @@ def provision(document):
     if not secret:
         raise ValueError('partner API secret is not configured')
     request = urllib.request.Request(
-        'http://127.0.0.1:18087/api/v1/users/' + document['user_id'],
-        data=json.dumps({'tags': document['tags']}).encode(), method='PUT',
+        'http://127.0.0.1:18087/api/v1/users/' + document['user_id'] + ('/keys' if keys else ''),
+        data=json.dumps({'tags': document['tags']}).encode() if method=='PUT' else None, method=method,
         headers={'Authorization': 'Bearer ' + secret, 'Content-Type': 'application/json'})
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     try:
@@ -66,8 +66,28 @@ def provision(document):
             result = json.load(response)
     except urllib.error.HTTPError as error:
         raise ValueError(f'partner identity API returned HTTP {error.code}') from None
+    if keys:
+        if not isinstance(result,dict) or not isinstance(result.get('keys'),list):
+            raise ValueError('partner API returned an invalid key list')
+        return result
     if not isinstance(result, dict) or result.get('user_id') != document['user_id']:
         raise ValueError('partner API returned an unexpected identity; inspect server state')
+    return result
+
+
+def provision(document):
+    return partner_request(document, 'PUT')
+
+
+def list_keys(document):
+    return partner_request(document,'GET',keys=True)['keys']
+
+
+def deactivate(document):
+    result = partner_request(document, 'DELETE')
+    if (result.get('active') is not False or type(result.get('keys_revoked')) is not int
+            or result['keys_revoked'] < 0):
+        raise ValueError('partner API did not confirm deactivation and key revocation')
     return result
 
 

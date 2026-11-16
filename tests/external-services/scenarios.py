@@ -48,16 +48,21 @@ cancellation of in-flight requests whose accounting still needs reconciliation.
     statuses, errors = Counter(), Counter()
     per_user = [0]*users
     successful_per_user = [0]*users
+    budget_denials_per_user = [0]*users
+    rate_denials_per_user = [0]*users
     latencies = [0]*(len(LATENCY_BUCKETS)+1)
     first_bytes = [0]*(len(LATENCY_BUCKETS)+1)
     completed_bytes = 0
+    in_flight = 0
+    peak_in_flight = 0
+    request_seconds = 0.0
 
     def bucket(values, seconds):
         index = next((i for i, bound in enumerate(LATENCY_BUCKETS) if seconds <= bound), len(LATENCY_BUCKETS))
         values[index] += 1
 
     def worker(user):
-        nonlocal completed_bytes
+        nonlocal completed_bytes, in_flight, peak_in_flight, request_seconds
         ready.wait()
         while not stop.is_set():
             now = time.monotonic()
@@ -77,6 +82,9 @@ cancellation of in-flight requests whose accounting still needs reconciliation.
             started = time.monotonic()
             if started >= timing['deadline'] or not active_at(started-timing['start'], active, idle):
                 continue
+            with lock:
+                in_flight += 1
+                peak_in_flight = max(peak_in_flight,in_flight)
             error = None
             result = {}
             try:
@@ -92,9 +100,13 @@ cancellation of in-flight requests whose accounting still needs reconciliation.
                 stop.set()
             elapsed = time.monotonic()-started
             with lock:
+                in_flight -= 1
+                request_seconds += elapsed
                 statuses[str(status)] += 1
                 per_user[user] += 1
                 successful_per_user[user] += int(status == 200)
+                budget_denials_per_user[user] += int(status == 429 and result.get('denial_reason') == 'budget')
+                rate_denials_per_user[user] += int(status == 429 and result.get('denial_reason') == 'rate_limit')
                 if error:
                     errors[error] += 1
                 bucket(latencies, elapsed)
@@ -124,7 +136,11 @@ cancellation of in-flight requests whose accounting still needs reconciliation.
         'interrupted': stop.is_set(), 'attempts': sum(statuses.values()),
         'statuses': dict(statuses), 'errors': dict(errors), 'per_user_attempts': per_user,
         'per_user_successes': successful_per_user,
+        'per_user_budget_denials': budget_denials_per_user,
+        'per_user_rate_limit_denials': rate_denials_per_user,
         'response_bytes': completed_bytes, 'latency_bucket_upper_seconds': list(LATENCY_BUCKETS)+[None],
         'latency_bucket_counts': latencies, 'first_byte_bucket_counts': first_bytes,
+        'peak_in_flight':peak_in_flight,
+        'mean_in_flight':request_seconds/(ended-timing['start']),
         'completed_rps': sum(statuses.values())/(ended-timing['start']),
     }

@@ -53,7 +53,7 @@ def configure(root,issuer,observability,client_secret,private_ip,*,issuer_name=N
         raise ValueError('invalid confidential-client secret; use visible ASCII without quotes/backslashes')
     if any(root.iterdir()):raise FileExistsError('use a new empty output directory')
     root.chmod(0o700)
-    names=('oauth.cfg','perses.yaml','prometheus.yaml','loki.yaml','tempo.yaml','collector.yaml',
+    names=('oauth.cfg','perses.yaml','monitoring-rules.yaml','prometheus.yaml','loki.yaml','tempo.yaml','collector.yaml',
            *lab.PERSES_ASSETS)
     with tempfile.TemporaryDirectory() as temporary:
         source=Path(temporary);lab.configure(source,certificates=False)
@@ -97,6 +97,8 @@ def configure(root,issuer,observability,client_secret,private_ip,*,issuer_name=N
             body+='Secret=lab-obs-server-cert,target=/lab/server.pem\nSecret=lab-obs-server-key,target=/lab/server.key\n'
             ca='issuer' if name=='auth' else 'telemetry'
             body+=f'Secret=lab-obs-{ca}-ca,target=/lab/{ca}-ca.pem\n'
+        if name=='prometheus':
+            body+='Secret=lab-obs-monitoring-rules-yaml,target=/lab/monitoring-rules.yaml\n'
         if name=='perses':
             for asset in lab.PERSES_ASSETS:
                 body+=f'Secret=lab-obs-{asset.replace(".","-")},target=/etc/perses/lab/{asset}\n'

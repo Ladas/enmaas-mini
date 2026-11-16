@@ -15,6 +15,60 @@ lab = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(lab)
 
 class LocalLab(unittest.TestCase):
+    def test_database_verifies_effective_mount_not_requested_size(self):
+        for size in (65536000,536870912,0):
+            with patch.object(lab.subprocess,'check_output',return_value=f'Filesystem Size Used Available Use% Mounted on\ntmpfs {size} 0 {size} 0% /dev/shm\n'):
+                if size==536870912:lab.check_database_shm()
+                else:
+                    with self.assertRaisesRegex(RuntimeError,'shared-memory'):lab.check_database_shm()
+        with patch.object(lab.subprocess,'check_output',return_value='invalid'):
+            with self.assertRaisesRegex(RuntimeError,'Cannot verify'):lab.check_database_shm()
+
+    def test_database_launch_isolates_and_bounds_shared_memory(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);lab.configure(root,certificates=False)
+            for name in ('ca.pem','server.pem','server.key'):(root/name).write_text('test fixture')
+            def probe(args,**kwargs):
+                return Mock(returncode=1 if args[1:3]==['pod','exists'] else 0)
+            with patch.object(lab,'STATE',root),patch.object(lab,'command') as call, patch.object(lab.subprocess,'run',side_effect=probe), patch.object(lab.subprocess,'check_output',return_value=b'[{"RepoDigests":["example@sha256:abc"]}]'), patch.object(lab,'wait_url'),patch.object(lab,'check'),patch.object(lab,'check_database_shm'):
+                lab.start()
+            db=next(c.args[0] for c in call.call_args_list if '--name' in c.args[0] and lab.POD+'-db' in c.args[0])
+            self.assertEqual(db[db.index('--ipc')+1],'private')
+            self.assertEqual(db[db.index('--tmpfs')+1],'/dev/shm:rw,nosuid,nodev,noexec,size=512m,mode=1777')
+            self.assertEqual(db[db.index('--memory')+1],'2g')
+            self.assertIn(lab.POD+'-db:/var/lib/postgresql/data:U',db)
+            self.assertIn('no-new-privileges',db)
+            self.assertNotIn('--privileged',db)
+
+    def test_trace_explorer_is_enabled_behind_existing_auth_proxy(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            lab.configure(root, certificates=False)
+            config = yaml.safe_load((root/'perses.yaml').read_text())
+            self.assertTrue(config['frontend']['explorer']['enable'])
+            self.assertEqual(config['datasource']['proxy']['allowed_hosts'], ['127.0.0.1'])
+
+    def test_inspected_ports_must_be_exact_loopback_bindings(self):
+        ports={str(port)+'/tcp':[{'HostIp':'127.0.0.1','HostPort':str(port)}]
+               for port in (18443,19443,24443)}
+        for bindings in (ports,dict(ports,**{'28443/tcp':[{'HostIp':'127.0.0.1','HostPort':'28443'}]})):
+            info={'Labels':{'io.enmaas.test-lab':lab.INSTANCE},'InfraConfig':{'PortBindings':bindings}}
+            with patch.object(lab.subprocess,'check_output',return_value=json.dumps([info]).encode()):
+                lab.check_port_bindings()
+        import copy
+        for kind in ('wildcard','ipv6','extra','missing','duplicate','remapped','foreign'):
+            info={'Labels':{'io.enmaas.test-lab':lab.INSTANCE},'InfraConfig':{'PortBindings':copy.deepcopy(ports)}}
+            bindings=info['InfraConfig']['PortBindings']
+            if kind=='wildcard':bindings['18443/tcp'][0]['HostIp']='0.0.0.0'
+            if kind=='ipv6':bindings['18443/tcp'][0]['HostIp']='::'
+            if kind=='extra':bindings['5432/tcp']=[{'HostIp':'127.0.0.1','HostPort':'5432'}]
+            if kind=='missing':bindings.pop('24443/tcp')
+            if kind=='duplicate':bindings['18443/tcp']*=2
+            if kind=='remapped':bindings['18443/tcp'][0]['HostPort']='443'
+            if kind=='foreign':info['Labels']={}
+            with self.subTest(kind=kind),patch.object(lab.subprocess,'check_output',return_value=json.dumps([info]).encode()):
+                with self.assertRaises(RuntimeError):lab.check_port_bindings()
+
     def test_client_certificate_probe_requires_tls_rejection(self):
         request = Mock(); context = Mock()
         for error in (ssl.SSLError('certificate required'),
@@ -36,6 +90,7 @@ class LocalLab(unittest.TestCase):
             lab.configure(root, certificates=False)
             config = yaml.safe_load((root/'collector.yaml').read_text())
             self.assertEqual(config['receivers']['otlp']['protocols']['http']['max_request_body_size'],4194304)
+            self.assertTrue(config['exporters']['prometheus']['send_timestamps'])
             self.assertEqual(config['processors']['batch']['send_batch_max_size'],512)
             for signal in ('logs', 'traces', 'metrics'):
                 self.assertEqual(config['service']['pipelines'][signal]['processors'],

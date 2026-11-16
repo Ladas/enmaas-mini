@@ -48,6 +48,33 @@ are created privately and removed automatically. Existing service certificates
 and trust stores are unchanged. This does not qualify expiry, revocation or
 certificate rotation on separate RHEL nodes.
 
+## Verify the user-provisioning API contract
+
+```sh
+python3 tests/external-services/private-issuer-runtime.py --keycloak --provisioning
+```
+
+This uses the pinned Keycloak image in a disposable internal network with no
+published ports. It verifies anonymous creation denial, a stable server-issued
+UUID, duplicate-username conflict, no direct administrator-group or
+realm-management role assignment, and deletion.
+The administrator client exists only in that disposable realm; this does not add
+public management routes or credentials to the running demo or RHEL deployment.
+The runtime CI suite includes this probe. It also creates two users through the
+population state machine and reruns it, verifying the same UUIDs without duplicate
+creation. All probe users and their private credential records are removed.
+
+The state machine saves each generated credential before creation, then records
+the returned issuer UUID. A lost creation response leaves an explicit uncertain
+record and stops the population. A failed identity read can be retried against the
+recorded UUID without creating a replacement.
+
+This probe qualifies the issuer contract with two users. The implemented
+[population helpers](keycloak-users.md) retain issuer UUIDs, import those identities
+into PriceTag, and stop for reconciliation after uncertain creation. Matching
+username or email alone does not authorize adoption. The separate 10,000-user
+issuer test does not qualify 10,000 gateway budgets/keys or the full RHEL flow.
+
 ## Receiver outage and recovery
 
 Run only against the existing **mock** gateway fixture with telemetry enabled.
@@ -222,14 +249,14 @@ With the MaaS-enabled fixture still running, use the same six phases as the RHEL
 
 ```sh
 python3 tests/external-services/local-benchmark.py \
-  --praxis-image "$PRAXIS_IMAGE" --duration 600 --offered-rps 30
+  --praxis-image "$PRAXIS_IMAGE" --scenario sustained --duration 600
 ```
 
-The duration is per phase. Use a short run for troubleshooting; use at least 65 seconds to include an active/idle burst cycle. The default is ten minutes per phase. The local generator opens a new TLS connection per request and runs on the workstation; results are not a prediction of RHEL capacity.
+The duration is per phase. The default sustained sequence holds each phase for ten minutes; `--duration 65` provides a smoke run. Use `--scenario traffic` for the earlier active/idle burst sequence. See [monitoring and scenarios](monitoring.md). The local generator opens a new TLS connection per request and runs on the workstation; results are not a prediction of RHEL capacity.
 
 The runner creates isolated users and finite keys, changes only the fixture gateway rate limiter, captures container resource samples and checks per-user events, tokens and stored USD charges. It restores the gateway configuration, disables the benchmark users and revokes their keys on exit. Private `summary.json`, `resources.jsonl` and `cleanup.json` remain under the named fixture state. Inspect `cleanup.json` after any failure. Do not run other fixture-management commands concurrently.
 
-Preflight requires at least 10% available Linux host memory and 30% available disk space; these checks continue during traffic. A capacity stop reports the threshold without printing credentials. On macOS, the checked host is the Podman Linux VM. Keep data volumes and previous results when freeing space; do not run a broad Podman prune.
+Preflight requires at least 10% available Linux host memory and 30% and 8 GiB available disk space; these checks continue during traffic. A capacity stop reports the threshold without printing credentials. On macOS, the checked host is the Podman Linux VM. Keep data volumes and previous results when freeing space; do not run a broad Podman prune.
 
 ## Inspect the results
 
@@ -257,15 +284,15 @@ NODE_EXTRA_CA_CERTS="$LAB_STATE/ca.pem" \
 )
 ```
 
-Use the same `ENMAAS_LAB_INSTANCE` and `LAB_STATE` as the running fixture. The helper reads only aggregate CPU, memory, load and filesystem capacity; on macOS it runs the sampler inside the Podman machine. Perses exposes the **enMAAS gateway — host resources** dashboard through its existing SSO gate. CPU needs at least two samples. This qualifies the sample/transport/dashboard path, not the RHEL systemd timer or host firewall policy.
+Use the same `ENMAAS_LAB_INSTANCE` and `LAB_STATE` as the running fixture. The helper reads aggregate CPU, memory, load, filesystem capacity and measurements for the 13 named fixture containers; on macOS it runs the sampler inside the Podman machine. Perses exposes the **enMAAS gateway — host resources** dashboard through its existing SSO gate. CPU needs at least two samples. This qualifies the sample/transport/dashboard path, not the RHEL systemd timer or host firewall policy.
 
-For the full six-phase benchmark, start a longer sampler in another terminal with the same repository and `ENMAAS_LAB_INSTANCE`:
+The telemetry-enabled benchmark samples resources automatically. For additional viewing time after it finishes, use the same repository and `ENMAAS_LAB_INSTANCE`:
 
 ```sh
 python3 tests/external-services/local-host-metrics.py --samples 150 --interval 30
 ```
 
-This supplies roughly 75 minutes of host metrics, including setup time. It is read-only on the Linux host and can run alongside the benchmark. Container resource samples are also captured independently by the benchmark runner.
+This supplies roughly 75 minutes of actual host/component metrics. It is read-only on the Linux host. The main dashboard alerts when sampling subsequently becomes stale.
 
 ## Trace navigation
 
@@ -293,6 +320,8 @@ NODE_EXTRA_CA_CERTS="$PWD/.state/$ENMAAS_LAB_INSTANCE/ca.pem" \
 
 The runtime test creates an isolated writer and collector with private volumes/secrets, emits synthetic sensitive-text sentinels through real Podman stdout, and verifies that only sanitized events reach Loki. It tests receiver restart and in-place file truncation, then removes its own containers, secrets and volumes. The browser test reads those events and checks the observability group boundary. This does not qualify RHEL SELinux or promise lossless logs during arbitrary rotation/outages.
 
+The browser check uses the capture's recorded time window. Run both commands together: the local Loki fixture retains logs for 24 hours, so an older evidence file does not prove its records are still available.
+
 ## Existing-session group revocation
 
 Use a **fresh disposable fixture**, with other local fixtures stopped because they share loopback ports. This opt-in adds a confidential test client with user-management/query roles to this local realm only; the RHEL generator does not enable it. Its secret stays in the private fixture directory. Keycloak's `kc-admin-api` scope supplies the audience required by its management API.
@@ -307,3 +336,139 @@ python3 tests/external-services/local.py down
 ```
 
 The test signs in to Perses, removes the synthetic administrator's observability group through the issuer API, and requires the existing cookie to lose access within 90 seconds. It restores group membership in cleanup. A backend error is not accepted as proof of denial. The configured refresh interval is one minute; this is bounded refresh-based revocation, not instantaneous invalidation. If cleanup fails, inspect the disposable realm before reusing it.
+
+## Verify population import against PriceTag
+
+With the local gateway stack running, use its instance name:
+
+```sh
+ENMAAS_LAB_INSTANCE=external-demo python3 tests/external-services/population-runtime.py
+```
+
+This runs the actual import engine and API clients inside the selected labelled
+pod. It verifies:
+
+- Immutable UUID identities (two by default), anonymous partner-API denial and no-write resume.
+- Per-user USD budgets, finite private inference keys and role/login readback.
+- Selected-key export followed by one mock inference request: the caller's
+  personal usage API reports exactly one request/five tokens, while another
+  imported user still reports zero requests.
+- Verified loopback HTTPS login with the configured public origin; an ordinary
+  user cannot list all users or assign a manager.
+- Temporary promotion of a disposable user allows authenticated team assignment;
+  demotion denies administrator access again on a new login with the same key.
+- Partner retirement revokes tracked keys; administrator key cleanup finds and
+  revokes a deliberately untracked MaaS key, then verifies zero active keys.
+
+Existing personas are unchanged. Only this run's disposable users are promoted,
+restored and retired; their budget overrides are removed. Audit records remain in
+the disposable database. The probe client is read-only with a private temporary
+filesystem. It receives the public CA, partner secret and a temporary management
+secret; that temporary secret is removed with the client. Credentials are not
+printed or passed in command arguments. No new port is published. Before inference, the launcher refuses non-loopback
+model endpoints and modified mock-profile definitions.
+
+The probe maps the RHEL client's loopback port to the local pod's PriceTag port.
+It does not qualify existing browser-session revocation, coordinated persona setup,
+cross-host export transfer or RHEL deployment. A two-user smoke run does not
+qualify the supported maximum population. Run it
+separately: launcher unit tests do not execute these API checks.
+
+### Increase the gateway population
+
+Use `--users 20` for the initial acceptance run, or explicitly select up to 10,000:
+
+```sh
+ENMAAS_LAB_INSTANCE=external-demo python3 tests/external-services/population-runtime.py --users 10000
+```
+
+Each invocation creates fresh synthetic identities, $5 budgets and finite keys,
+then retires its identities/keys and removes their overrides. It reports population
+size and timings only after all checks and cleanup succeed. The selected-user
+inference and role checks use two members of that population; this is provisioning
+scale, not 10,000 simultaneous requests or browser logins. Issuer population is
+qualified separately in [Keycloak users](keycloak-users.md#local-population-scale-test).
+
+The client has a 512 MiB memory limit, 256 MiB temporary filesystem and a bounded
+execution timeout (10 minutes for small runs, up to one hour at scale). The
+temporary filesystem accommodates four per-user receipt/key files, including
+filesystem block overhead, at the maximum population. Do not run
+it alongside another benchmark. Timeout or forced interruption can leave synthetic
+identities, keys or budgets in the disposable database; do not assume cleanup
+passed without its success output. Saved private keys disappear with the client;
+server-side keys have a finite 24-hour lifetime.
+
+## Verify fresh dashboard persona setup
+
+With the labelled local stack running:
+
+```sh
+ENMAAS_LAB_INSTANCE=external-demo python3 tests/external-services/persona-runtime.py
+```
+
+This creates temporary PriceTag, MaaS and Praxis containers and two fresh databases
+inside the selected local test pod. No additional host port is published. It runs
+the actual persona setup helper through the partner, management and authenticated
+HTTPS APIs, verifies roles/team membership and budgets, checks no-write resume,
+and confirms that changed roles are not silently restored. The fixture uses
+synthetic UUIDs; it does not qualify Keycloak browser login or VM networking.
+
+Existing users, issuer settings and benchmark history are unchanged. Temporary
+containers, secrets and databases are removed in cleanup. Cleanup attempts all
+owned resources even if one removal fails; any failure needs inspection before
+reuse. Abrupt process termination can leave resources whose names contain
+`persona-` or databases prefixed `persona_`; do not delete unrelated resources.
+
+## Realistic synthetic workload
+
+The profile-enabled benchmark mixes the configured `openai/` and `external/`
+models over their native Chat Completions and Messages APIs. It uses fictional
+15 people and 10 clearly named bot accounts. People receive $300 monthly budgets;
+bots receive $1,000 overrides. Each identity has its own finite inference key.
+
+| Workload | Simulated input/output tokens | First-token delay | Delay between SSE frames |
+| --- | --- | --- | --- |
+| Small coding question | 512 / 128 | 150 ms | 60 ms |
+| Pull-request review | 2,048 / 384 | 350 ms | 100 ms |
+| Build investigation | 4,096 / 768 | 500 ms | 140 ms |
+| Repository planning | 8,192 / 1,024 | 700 ms | 180 ms |
+| Bot evaluation job | 16,384 / 1,536 | 900 ms | 220 ms |
+
+Profiles are deterministic across users so accounting can be checked exactly.
+These are reported mock token counts and bounded delays, not actual tokenization,
+model execution or a measurement of model throughput. Responses remain small;
+this does not qualify large-output bandwidth. Client User-Agent values simulate
+OpenCode, Claude Code, Codex and SDK categories; those applications are not launched.
+
+Country/state and cost-center fields are synthetic directory metadata set through
+PriceTag's partner API. The map shows user-directory geography, not geolocation of
+request source IPs. No forwarding or authentication headers are spoofed.
+
+The same profile definitions and HTTPS transport are used by the RHEL runner.
+Fresh-host RHEL acceptance remains separate. Update mock-provider fixture files
+before using new workload instructions on an existing deployment; an older mock
+returns the legacy 2/3-token response and exact validation intentionally fails.
+
+Run with the existing `ENMAAS_LAB_INSTANCE` and reviewed `PRAXIS_IMAGE`:
+
+```sh
+python3 tests/external-services/local-benchmark.py \
+  --praxis-image "$PRAXIS_IMAGE" --scenario sustained --duration 65
+```
+
+Use `--duration 600` for ten minutes per phase. `--model ALIAS` pins one configured
+model; omitting it distributes models across users. The six phases include
+baseline, team, concurrent requests, sustained high load, rate-limit denials and recovery. Use `--scenario traffic` for the separate burst variant.
+The report includes observed peak/mean in-flight requests as well as offered rate.
+
+Host metrics are sampled throughout a telemetry-enabled run. Real gateway traces
+remain enabled across restarts. Perses's `frontend.explorer.enable` permits trace
+navigation behind the existing SSO gate. Benchmark phase events are labeled
+`enmaas-mock-benchmark`; they are not application log messages.
+
+Cleanup revokes benchmark keys and deactivates its users, preserving usage history
+and directory metadata. Select **All/inactive users** when inspecting these retired
+fixtures. Choose a dashboard time range that includes the run; host sampling ends
+with the benchmark rather than pretending that historical data is live.
+
+For a browsable manager view, follow [Alice’s team setup](local-dashboards.md#browse-alices-team) after cleanup. This is an explicit local demo operation, separate from the remote traffic runner.

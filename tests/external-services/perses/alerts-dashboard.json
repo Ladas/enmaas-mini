@@ -1,0 +1,473 @@
+{
+  "kind": "Dashboard",
+  "metadata": {
+    "name": "enmaas-alerts",
+    "project": "praxis"
+  },
+  "spec": {
+    "display": {
+      "name": "enMAAS \u2014 alert detail"
+    },
+    "duration": "2h",
+    "refreshInterval": "15s",
+    "links": [
+      {
+        "name": "Main monitoring",
+        "url": "/projects/praxis/dashboards/enmaas-monitoring",
+        "targetBlank": false
+      },
+      {
+        "name": "Gateway traffic",
+        "url": "/projects/praxis/dashboards/enmaas-gateway",
+        "targetBlank": false
+      },
+      {
+        "name": "Host resources",
+        "url": "/projects/praxis/dashboards/enmaas-host",
+        "targetBlank": false
+      },
+      {
+        "name": "Database & usage metering",
+        "url": "/projects/praxis/dashboards/enmaas-accounting",
+        "targetBlank": false
+      },
+      {
+        "name": "Components",
+        "url": "/projects/praxis/dashboards/enmaas-components",
+        "targetBlank": false
+      },
+      {
+        "name": "Traces",
+        "url": "/projects/praxis/dashboards/enmaas-traces",
+        "targetBlank": false
+      },
+      {
+        "name": "Service events",
+        "url": "/projects/praxis/dashboards/enmaas-logs",
+        "targetBlank": false
+      }
+    ],
+    "panels": {
+      "navigation": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Monitoring navigation"
+          },
+          "plugin": {
+            "kind": "Markdown",
+            "spec": {
+              "text": "[Main monitoring](/projects/praxis/dashboards/enmaas-monitoring) \u00b7 [Benchmark](/projects/praxis/dashboards/enmaas-benchmark) \u00b7 [Gateway traffic](/projects/praxis/dashboards/enmaas-gateway) \u00b7 [Host](/projects/praxis/dashboards/enmaas-host) \u00b7 [Components](/projects/praxis/dashboards/enmaas-components) \u00b7 [Database & usage metering](/projects/praxis/dashboards/enmaas-accounting) \u00b7 [Alerts](/projects/praxis/dashboards/enmaas-alerts) \u00b7 [Inference traces](/projects/praxis/dashboards/enmaas-traces) \u00b7 [Service events](/projects/praxis/dashboards/enmaas-logs)"
+            }
+          }
+        }
+      },
+      "firing": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "All current firing alerts",
+            "description": "MEANING\nFiring rules at the selected end time, grouped by category and severity.\n\nTIME WINDOW\nSnapshot at the selected end time."
+          },
+          "plugin": {
+            "kind": "Table",
+            "spec": {
+              "density": "standard",
+              "pagination": true,
+              "defaultColumnHeight": "auto",
+              "columnSettings": [
+                {
+                  "name": "category",
+                  "header": "Category",
+                  "sort": "asc",
+                  "width": 110
+                },
+                {
+                  "name": "severity",
+                  "header": "Severity",
+                  "width": 100
+                },
+                {
+                  "name": "summary",
+                  "header": "Condition",
+                  "width": 260
+                },
+                {
+                  "name": "host",
+                  "header": "Host",
+                  "width": 120
+                },
+                {
+                  "name": "component",
+                  "header": "Service",
+                  "width": 130
+                },
+                {
+                  "name": "replica",
+                  "header": "Instance",
+                  "width": 100
+                },
+                {
+                  "name": "action",
+                  "header": "Response",
+                  "width": 330
+                },
+                {
+                  "name": "detail",
+                  "header": "Details",
+                  "width": 100,
+                  "dataLink": {
+                    "url": "/projects/praxis/dashboards/enmaas-${__data.fields[\"detail\"]}",
+                    "openNewTab": false
+                  }
+                },
+                {
+                  "name": "timestamp",
+                  "hide": true
+                },
+                {
+                  "name": "value",
+                  "hide": true
+                },
+                {
+                  "name": "__name__",
+                  "hide": true
+                },
+                {
+                  "name": "alertname",
+                  "hide": true
+                },
+                {
+                  "name": "alertstate",
+                  "hide": true
+                },
+                {
+                  "name": "exported_job",
+                  "hide": true
+                },
+                {
+                  "name": "instance",
+                  "hide": true
+                },
+                {
+                  "name": "job",
+                  "hide": true
+                },
+                {
+                  "name": "otel_scope_name",
+                  "hide": true
+                }
+              ],
+              "cellSettings": [
+                {
+                  "condition": {
+                    "kind": "Value",
+                    "spec": {
+                      "value": "critical"
+                    }
+                  },
+                  "textColor": "#b71c1c"
+                },
+                {
+                  "condition": {
+                    "kind": "Value",
+                    "spec": {
+                      "value": "warning"
+                    }
+                  },
+                  "textColor": "#995200"
+                }
+              ]
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "ALERTS{category!=\"generator\",alertstate=\"firing\",alertname=~\"Enmaas.*\"}",
+                    "instant": true,
+                    "seriesNameFormat": "{{category}} \u00b7 {{summary}} \u2014 {{action}}"
+                  }
+                }
+              }
+            }
+          ],
+          "links": [
+            {
+              "name": "Details",
+              "url": "/projects/praxis/dashboards/enmaas-monitoring",
+              "targetBlank": false
+            }
+          ]
+        }
+      },
+      "pending": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Pending alerts",
+            "description": "MEANING\nConditions not yet sustained for their configured duration.\n\nTIME WINDOW\nSnapshot at the selected end time."
+          },
+          "plugin": {
+            "kind": "Table",
+            "spec": {
+              "density": "standard",
+              "pagination": true,
+              "defaultColumnHeight": "auto",
+              "columnSettings": [
+                {
+                  "name": "category",
+                  "header": "Category",
+                  "sort": "asc",
+                  "width": 110
+                },
+                {
+                  "name": "severity",
+                  "header": "Severity",
+                  "width": 100
+                },
+                {
+                  "name": "summary",
+                  "header": "Condition",
+                  "width": 260
+                },
+                {
+                  "name": "host",
+                  "header": "Host",
+                  "width": 120
+                },
+                {
+                  "name": "component",
+                  "header": "Service",
+                  "width": 130
+                },
+                {
+                  "name": "replica",
+                  "header": "Instance",
+                  "width": 100
+                },
+                {
+                  "name": "action",
+                  "header": "Response",
+                  "width": 330
+                },
+                {
+                  "name": "detail",
+                  "header": "Details",
+                  "width": 100,
+                  "dataLink": {
+                    "url": "/projects/praxis/dashboards/enmaas-${__data.fields[\"detail\"]}",
+                    "openNewTab": false
+                  }
+                },
+                {
+                  "name": "timestamp",
+                  "hide": true
+                },
+                {
+                  "name": "value",
+                  "hide": true
+                },
+                {
+                  "name": "__name__",
+                  "hide": true
+                },
+                {
+                  "name": "alertname",
+                  "hide": true
+                },
+                {
+                  "name": "alertstate",
+                  "hide": true
+                },
+                {
+                  "name": "exported_job",
+                  "hide": true
+                },
+                {
+                  "name": "instance",
+                  "hide": true
+                },
+                {
+                  "name": "job",
+                  "hide": true
+                },
+                {
+                  "name": "otel_scope_name",
+                  "hide": true
+                }
+              ],
+              "cellSettings": [
+                {
+                  "condition": {
+                    "kind": "Value",
+                    "spec": {
+                      "value": "critical"
+                    }
+                  },
+                  "textColor": "#b71c1c"
+                },
+                {
+                  "condition": {
+                    "kind": "Value",
+                    "spec": {
+                      "value": "warning"
+                    }
+                  },
+                  "textColor": "#995200"
+                }
+              ]
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "ALERTS{category!=\"generator\",alertstate=\"pending\",alertname=~\"Enmaas.*\"}",
+                    "instant": true,
+                    "seriesNameFormat": "{{category}} \u00b7 {{summary}} \u2014 {{action}}"
+                  }
+                }
+              }
+            }
+          ],
+          "links": [
+            {
+              "name": "Details",
+              "url": "/projects/praxis/dashboards/enmaas-monitoring",
+              "targetBlank": false
+            }
+          ]
+        }
+      },
+      "history": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Alert history",
+            "description": "MEANING\nHistorical pending/firing state in the selected window.\n\nTIME WINDOW\nMeasurements over the selected time window; gaps mean no matching samples."
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": {
+                "mode": "table",
+                "position": "bottom",
+                "values": [
+                  "max"
+                ]
+              },
+              "visual": {
+                "areaOpacity": 0,
+                "lineWidth": 2
+              },
+              "yAxis": {
+                "format": {
+                  "unit": "decimal",
+                  "decimalPlaces": 2,
+                  "shortValues": true
+                }
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "PrometheusTimeSeriesQuery",
+                  "spec": {
+                    "query": "ALERTS{category!=\"generator\",alertname=~\"Enmaas.*\"}",
+                    "instant": false,
+                    "seriesNameFormat": "{{category}} \u00b7 {{summary}} \u2014 {{action}}"
+                  }
+                }
+              }
+            }
+          ],
+          "links": [
+            {
+              "name": "Details",
+              "url": "/projects/praxis/dashboards/enmaas-monitoring",
+              "targetBlank": false
+            }
+          ]
+        }
+      },
+      "guide": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Alert response guide"
+          },
+          "plugin": {
+            "kind": "Markdown",
+            "spec": {
+              "text": "**HostCpuHigh \u00b7 capacity \u00b7 warning** \u2014 Host CPU over 85%. Reduce offered load; inspect host CPU. [Details](/projects/praxis/dashboards/enmaas-host)\n\n**HostMemoryLow \u00b7 capacity \u00b7 warning** \u2014 Host available memory below 15%. Reduce concurrency; inspect memory and cache. [Details](/projects/praxis/dashboards/enmaas-host)\n\n**HostMemoryCritical \u00b7 capacity \u00b7 critical** \u2014 Host available memory below 8%. Stop load before OOM. [Details](/projects/praxis/dashboards/enmaas-host)\n\n**HostDiskLow \u00b7 storage \u00b7 warning** \u2014 Data filesystem below 15% available. Inspect retention and stored data. [Details](/projects/praxis/dashboards/enmaas-host)\n\n**HostDiskCritical \u00b7 storage \u00b7 critical** \u2014 Data filesystem below 8% available. Stop load; reclaim owned retained data. [Details](/projects/praxis/dashboards/enmaas-host)\n\n**ContainerMemoryHigh \u00b7 capacity \u00b7 warning** \u2014 Component memory above 80% of its limit. Inspect component headroom before increasing load. [Details](/projects/praxis/dashboards/enmaas-components)\n\n**FileDescriptorsHigh \u00b7 capacity \u00b7 warning** \u2014 Gateway file descriptors above 80%. Inspect concurrency and upstream connections. [Details](/projects/praxis/dashboards/enmaas-gateway)\n\n**DatabasePoolWaiting \u00b7 usage_metering \u00b7 warning** \u2014 Metering database pool is waiting. Inspect pool use and database latency. [Details](/projects/praxis/dashboards/enmaas-accounting)\n\n**AccountingInsertErrors \u00b7 usage_metering \u00b7 critical** \u2014 Usage insertion errors observed. Stop capacity claims; investigate usage-record delivery. [Details](/projects/praxis/dashboards/enmaas-accounting)\n\n**InferenceSlow \u00b7 traffic \u00b7 warning** \u2014 Mean inference duration above five seconds. Compare upstream delay with CPU and pool waits. [Details](/projects/praxis/dashboards/enmaas-gateway)\n\n**GatewayServerErrors \u00b7 traffic \u00b7 critical** \u2014 More than 5% gateway responses are 5xx. Inspect traces and upstream failures. [Details](/projects/praxis/dashboards/enmaas-gateway)\n\n**RateLimitActive \u00b7 policy \u00b7 warning** \u2014 Rate limiting is rejecting traffic. Expected in denial phase; not proof of capacity exhaustion. [Details](/projects/praxis/dashboards/enmaas-gateway)\n\n**QuotaDenials \u00b7 policy \u00b7 warning** \u2014 Spending policy denied requests. Inspect PriceTag budgets; not a host bottleneck. [Details](/projects/praxis/dashboards/enmaas-accounting)\n\n**GatewayScrapeFailed \u00b7 telemetry \u00b7 critical** \u2014 Gateway scrape failed. Inspect the gateway metrics listener and relay. [Details](/projects/praxis/dashboards/enmaas-gateway)\n\n**AccountingScrapeFailed \u00b7 telemetry \u00b7 critical** \u2014 PriceTag scrape failed. Inspect the metering metrics listener and relay. [Details](/projects/praxis/dashboards/enmaas-accounting)\n\n**HostTelemetryStale \u00b7 telemetry \u00b7 critical** \u2014 Host samples absent or stale. Start sampler; missing telemetry is not healthy capacity. [Details](/projects/praxis/dashboards/enmaas-host)\n\n**GatewayMetricsStale \u00b7 telemetry \u00b7 critical** \u2014 Gateway metric samples are stale. Inspect the relay and receiving collector. [Details](/projects/praxis/dashboards/enmaas-gateway)\n\n**AccountingMetricsStale \u00b7 telemetry \u00b7 critical** \u2014 PriceTag metric samples are stale. Inspect the relay and receiving collector. [Details](/projects/praxis/dashboards/enmaas-accounting)\n\n**GatewayScrapeMissing \u00b7 telemetry \u00b7 critical** \u2014 Gateway metrics absent. Inspect gateway relay and scrape target. [Details](/projects/praxis/dashboards/enmaas-gateway)\n\n**AccountingScrapeMissing \u00b7 telemetry \u00b7 critical** \u2014 PriceTag metrics absent. Inspect metering relay and scrape target. [Details](/projects/praxis/dashboards/enmaas-accounting)"
+            }
+          }
+        }
+      }
+    },
+    "layouts": [
+      {
+        "kind": "Grid",
+        "spec": {
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 24,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/navigation"
+              }
+            },
+            {
+              "x": 0,
+              "y": 3,
+              "width": 24,
+              "height": 12,
+              "content": {
+                "$ref": "#/spec/panels/firing"
+              }
+            },
+            {
+              "x": 0,
+              "y": 15,
+              "width": 24,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/pending"
+              }
+            },
+            {
+              "x": 0,
+              "y": 23,
+              "width": 24,
+              "height": 10,
+              "content": {
+                "$ref": "#/spec/panels/history"
+              }
+            },
+            {
+              "x": 0,
+              "y": 33,
+              "width": 24,
+              "height": 24,
+              "content": {
+                "$ref": "#/spec/panels/guide"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

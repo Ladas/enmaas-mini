@@ -5,6 +5,7 @@ No AWS calls, credentials creation, infrastructure mutation or cleanup execution
 Existing launch journals remain authoritative for actual resource identifiers.
 """
 import argparse
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -12,15 +13,24 @@ import re
 import stat
 import shlex
 import uuid
+import sys
 
 FIELDS = {'version', 'id', 'account', 'region', 'ssh_key_path', 'aws_profile',
           'zone_id', 'domain', 'tls'}
+
+
+def validate_group(group):
+    if not isinstance(group, str) or not re.fullmatch(r'[a-z][a-z0-9]{0,7}', group):
+        raise ValueError('Group must be 1–8 lowercase letters/digits, starting with a letter; supply --group or use interactive init')
+    return group
 
 
 def validate(value):
     if (not isinstance(value, dict) or value.get('version') not in (1, 2)
             or set(value) != (FIELDS | ({'group'} if value['version'] == 2 else set()))):
         raise ValueError('Unsupported deployment manifest fields/version')
+    if value['version'] == 2:
+        validate_group(value['group'])
     patterns = {'id': (r'enmaas-[a-f0-9]{16}' if value['version'] == 1 else r'em-[a-z][a-z0-9]{0,7}-[a-f0-9]{12}'), 'account': r'[0-9]{12}',
                 'region': r'[a-z]{2}(?:-[a-z]+)+-[0-9]',
                 'aws_profile': r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}'}
@@ -29,8 +39,6 @@ def validate(value):
             raise ValueError('Invalid deployment field: ' + key)
     if value['version'] == 2:
         group = value['group']
-        if not isinstance(group, str) or not re.fullmatch(r'[a-z][a-z0-9]{0,7}', group):
-            raise ValueError('Group must be 1–8 lowercase letters/digits, starting with a letter')
         if not re.fullmatch('em-' + group + r'-[a-f0-9]{12}', value['id']):
             raise ValueError('Deployment ID does not match its group')
     key = value['ssh_key_path']
@@ -58,6 +66,7 @@ def new(account, region, ssh_key_path, aws_profile, zone_id='', domain='', *, gr
              'aws_profile': aws_profile, 'zone_id': zone_id, 'domain': domain,
              'tls': 'private-ca'}
     if group is not None:
+        validate_group(group)
         value.update(version=2, group=group, id='em-' + group + '-' + uuid.uuid4().hex[:12])
     return validate(value)
 
@@ -215,14 +224,58 @@ def summary(value, journals):
     return result
 
 
+def service_access(value, path):
+    """Offline access instructions bound to one saved deployment; no credential reads."""
+    validate(value)
+    config = read_private_json(path)
+    if (not isinstance(config, dict) or config.get('deployment') != value['id']
+            or config.get('ssh_key') != value['ssh_key_path']):
+        raise ValueError('Service configuration belongs to another deployment or SSH key')
+    spec = importlib.util.spec_from_file_location('registry_services', Path(__file__).with_name('services.py'))
+    services = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(services)
+    access = services.access_summary(config)
+    return {'deployment': value['id'], 'service_config': str(path),
+            'live_verified': False, 'access': access}
+
+
+def init_settings(args):
+    """Collect nonsecret settings only; never discover or request credentials."""
+    def setting(field, title, default=None):
+        supplied = getattr(args, field)
+        if supplied is not None:
+            if not supplied.strip():
+                raise ValueError('Empty --' + field.replace('_', '-') + '; omit it for interactive setup')
+            return supplied
+        if not sys.stdin.isatty():
+            raise ValueError('Supply --' + field.replace('_', '-') + ' or run init in an interactive terminal')
+        suffix = ' [' + default + ']' if default else ''
+        answer = input(title + suffix + ': ').strip()
+        if not answer and default:
+            return default
+        if not answer:
+            raise ValueError('A value is required for --' + field.replace('_', '-'))
+        return answer
+
+    group = validate_group(setting('group', 'Deployment group (1–8 lowercase letters/digits)'))
+    account = setting('account', 'Target AWS account ID (12 digits)')
+    region = setting('region', 'Deployment region', 'eu-central-1')
+    profile = setting('aws_profile', 'AWS CLI profile for the separately prepared scoped role')
+    value = new(account, region, '/pending-ssh-path', profile, args.zone_id, args.domain, group=group)
+    value['ssh_key_path'] = setting('ssh_key_path', 'SSH key path (not created by this command)',
+        str(Path.home()/'.secure-single-server-tests/ssh'/value['id']))
+    return validate(value)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--registry', type=Path, default=Path('.state/deployments'))
     commands = parser.add_subparsers(dest='command', required=True)
     init = commands.add_parser('init')
     for field in ('account', 'region', 'ssh-key-path', 'aws-profile'):
-        init.add_argument('--' + field, required=True)
-    init.add_argument('--group', required=True, help='shared operator group: 1–8 lowercase letters/digits, starting with a letter')
+        init.add_argument('--' + field)
+    init.add_argument('--group', help='shared operator group: 1–8 lowercase letters/digits, starting with a letter')
+    init.add_argument('--dry-run', action='store_true', help='preview local settings only; no AWS calls or files written')
     init.add_argument('--zone-id', default='')
     init.add_argument('--domain', default='')
     commands.add_parser('list')
@@ -231,21 +284,32 @@ def main():
     report = commands.add_parser('summary', help='print safe metadata from VM recovery journals')
     report.add_argument('manifest', type=Path)
     report.add_argument('--journals', type=Path, default=Path('.state'))
+    access = commands.add_parser('access', help='print configured dashboard URLs and selected credential commands without connecting')
+    access.add_argument('manifest', type=Path)
+    access.add_argument('--service-config', type=Path, required=True)
     trust = commands.add_parser('trust-policy', help='render an exact-principal trust proposal without creating a role')
     trust.add_argument('manifest', type=Path)
     trust.add_argument('--principal-arn', required=True)
     trust.add_argument('--allow-role-principal', action='store_true', help='acknowledge that source-role MFA/authentication must be enforced separately')
     args = parser.parse_args()
     if args.command == 'init':
-        print(save(args.registry, new(args.account, args.region, args.ssh_key_path,
-                                      args.aws_profile, args.zone_id, args.domain, group=args.group)))
+        value = init_settings(args)
+        if args.dry_run:
+            print(json.dumps({'deployment': value, 'aws_calls_made': False, 'files_written': False,
+                              'permissions_verified': False,
+                              'scope': 'Local settings preview, not an AWS capacity or authorization dry run',
+                              'next': 'Use operator-bootstrap.py and operator-profile.py to prepare scoped access before provisioning'}, indent=2))
+        else:
+            print(save(args.registry, value))
     elif args.command == 'list':
         for path in sorted(args.registry.glob('*.json')):
             value = load(path)
             print(json.dumps({key: value.get(key) for key in ('id', 'group', 'account', 'region', 'domain', 'aws_profile')}))
     else:
         value = load(args.manifest)
-        if args.command == 'summary':
+        if args.command == 'access':
+            print(json.dumps(service_access(value, args.service_config), indent=2))
+        elif args.command == 'summary':
             print(json.dumps(summary(value, args.journals), indent=2))
         elif args.command == 'env':
             print(shell_selection(value))
@@ -259,5 +323,5 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except (ValueError, OSError) as error:
+    except (ValueError, OSError, EOFError) as error:
         raise SystemExit(str(error))

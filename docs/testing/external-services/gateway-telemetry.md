@@ -1,6 +1,6 @@
 # Gateway telemetry agent
 
-**Qualification in progress.** The pinned Collector accepts this configuration and its boundary tests pass. Local tests verify real Praxis metrics and fresh traces through the mTLS relay, with authorization/cookie sentinels absent from stored trace details. Four authenticated Perses panels receive finite samples. Mock inference/accounting and telemetry through gateway restarts pass locally; full RHEL installation remains unqualified. A separate restricted systemd sampler collects aggregate host resources; sampling and exact-value transport pass locally, and four host-resource panels passed authenticated browser checks with real Linux samples. The generated timer also passed in the local Podman Linux VM, including systemd credential loading and an enforced negative IP-allowlist test; RHEL execution remains unqualified. Restricted file-log ingestion and the authenticated log table pass locally.
+**Qualification in progress.** The pinned Collector accepts this configuration and its boundary tests pass. Local tests verify real Praxis metrics and fresh traces through the mTLS relay, with authorization/cookie sentinels absent from stored trace details. The [main monitoring and detail dashboards](monitoring.md) receive actual gateway, host, component and accounting samples locally. Mock inference/accounting and telemetry through gateway restarts pass locally; full RHEL installation remains unqualified. A separate restricted systemd sampler collects aggregate host resources; sampling and exact-value transport pass locally, and four host-resource panels passed authenticated browser checks with real Linux samples. The generated timer also passed in the local Podman Linux VM, including systemd credential loading and an enforced negative IP-allowlist test; RHEL execution remains unqualified. Restricted file-log ingestion and the authenticated log table pass locally.
 
 The rootless relay shares the gateway's network namespace. It scrapes the private Praxis admin metrics endpoint and PriceTag metrics, accepts Praxis OTLP on loopback, applies the same attribute restrictions as the receiving collector, and exports over mTLS. Nothing is published from the gateway relay to the host network.
 
@@ -44,7 +44,7 @@ The installer stores credentials as service-account Podman secrets and creates a
 
 1. Verify native RHEL Quadlet startup, gateway restart behavior and SELinux permissions.
 2. Qualify the local-tested inference and accounting path on RHEL, including PriceTag metrics.
-3. Repeat the locally verified traffic/resource/log/trace dashboards on RHEL; benchmark phase markers still need integration. Imported reference dashboards are not automatically qualified.
+3. Repeat the locally verified traffic/resource/log/trace dashboards on RHEL; local benchmark phase markers are implemented; the separate-host phase/resource path still needs qualification. Imported reference dashboards are not automatically qualified.
 4. Disconnect the receiver and measure queue/drop behavior while inference and accounting continue.
 5. Qualify the host-sampling timer and restricted log collection before the full RHEL benchmark.
 
@@ -103,3 +103,9 @@ python3 tests/external-services/host-metrics-runtime.py
 ```
 
 It uses disposable certificates and temporary units under `/run`, starts the generated 15-second timer, requires two mTLS deliveries, and verifies that excluding the receiver IP prevents another delivery. It then removes its units, certificate files and receiver. It does not stop unrelated services automatically. Restart the local lab pod afterward if needed.
+
+### Distinguish multiple hosts
+
+When generating each host’s telemetry configuration, pass a unique `--host-id`, such as `gateway-1` or `gateway-2`, to `telemetry-agent.py`. The alias is applied to both host samples and gateway/metering metric scrapes. Use a nonsecret lowercase alias (letters, digits and hyphens, at most 40 characters), not an address or user identifier. Keep it stable across service restarts.
+
+This labels separate hosts; it does not deploy additional hosts or collect their container metrics automatically. The local container sampler is qualified separately.

@@ -9,7 +9,7 @@ workstation; they are not service-installer inputs.
 | Choice | Services | Database | Login and monitoring |
 | --- | --- | --- | --- |
 | **One node** | Praxis, MaaS and PriceTag on one RHEL host | Local PostgreSQL by default; optional external MaaS and metering databases | User keys; no SSO or external observability configured |
-| **Full deployment** | Gateway node plus separate Keycloak and observability nodes | Local PostgreSQL by default; optional external gateway databases | OIDC browser login; Perses with Prometheus, Loki, Tempo and collectors |
+| **Full deployment** | Gateway node connected to an external OIDC issuer and observability services; optionally on dedicated nodes | Local PostgreSQL by default; optional external gateway databases | OIDC browser login; Perses with Prometheus, Loki, Tempo and collectors |
 
 These are two production deployment layouts, not a production/test distinction.
 Both can use real providers. Mock providers and benchmarks are separate testing
@@ -48,13 +48,10 @@ Messages endpoints. Supply the appropriate protected key files and explicit URLs
 never put secret values into arguments or shell history. Headless mode fails when
 required choices are missing; `--yes` alone does not disable prompts.
 
-For a mock-only one-node test, no provider credentials are needed:
-
-```sh
-sudo scripts/pricetag/install --non-interactive --yes \
-  --hostname "$GATEWAY_HOST" --mode mock --mock-profiles \
-  --image-mode published --no-sample-users --monthly-usd 5
-```
+For testing with mock providers, follow the separate
+[mock installation guide](../../testing/external-services/headless.md#mock-benchmark-gateway).
+After testing, [replace mock profiles with real providers](../../testing/external-services/providers.md#convert-one-profile-to-a-real-provider)
+without reinstalling the gateway or its remote services.
 
 Published images and source candidates may expose different UI features; see
 [image selection](images.md). Existing installations are refused: these commands
@@ -62,7 +59,7 @@ are fresh-install paths, not upgrades.
 
 ## Full deployment: installation order
 
-1. Prepare three fresh RHEL hosts and restricted peer networking.
+1. Prepare the gateway RHEL host and restricted peer networking. Use existing identity/observability services, or prepare separate hosts for them.
 2. Generate role-specific certificates on the workstation; distribute only leaf keys.
 3. Install Keycloak; transfer each service's own client configuration.
 4. Install observability and the gateway; provision immutable SSO identities.

@@ -1,6 +1,9 @@
 # Headless lab installation
 
-Provision the hosts from the [separate AWS lab guide](aws.md), then apply [peer rules](network.md), distribute [certificates](certificates.md), and prepare the [issuer](keycloak-rhel.md) and [observability](observability-rhel.md). Their installers take explicit arguments and have no menus. The observability generator requires both its public address and `--private-ip`; use the private IP printed by `aws_lab_info`. Its server certificate must cover both addresses. AWS launch/RDS confirmations remain separate administrator operations.
+For the developing workstation-driven command, see [coordinated service installation](service-orchestration.md).
+It distributes the reviewed checkout and reuses these steps on fresh hosts; full RHEL acceptance is pending.
+
+Provision the hosts from the [separate AWS lab guide](aws.md), then apply [reviewed peer rules without prompts](network.md#headless-application-of-a-reviewed-plan), distribute [certificates](certificates.md), and prepare the [issuer](keycloak-rhel.md) and [observability](observability-rhel.md). Their installers take explicit arguments and have no menus. The observability generator requires both its public address and `--private-ip`; use the private IP printed by `aws_lab_info`. Its server certificate must cover both addresses. AWS launch/RDS confirmations remain separate administrator operations.
 
 Run application installation **on the gateway**, from the reviewed checkout. `--non-interactive` disables prompts even when a terminal is attached. Missing choices or credential-file paths fail before installation. `--yes` explicitly authorizes the installation; it does not supply missing credentials.
 
@@ -24,16 +27,14 @@ This selects replaceable `openai`/`external` mock profiles; see [provider manage
 
 ## Real providers
 
-Use the same explicit image/TLS/OIDC options, replacing `--mode mock` with `--mode real` and the desired provider arguments. Store keys in root-owned mode-`0600` files; never put their values in arguments, exported variables or shell history.
+For a fresh installation with real providers, follow the production
+[full-deployment commands](../../quickstarts/remote-gateway-pricetag/full-deployment.md#headless).
+They retain the remote-service configuration and supply real provider arguments
+instead of mock mode.
 
-| Provider | Arguments to add |
-| --- | --- |
-| OpenAI directly | `--provider openai --openai-key-file /root/enmaas-inputs/openai.key` |
-| External OpenAI-compatible API | `--provider external --external-api openai --external-openai-url https://provider.example/v1 --external-key-file /root/enmaas-inputs/external.key` |
-| External Anthropic Messages API | `--provider external --external-api anthropic --external-messages-url https://provider.example --external-key-file /root/enmaas-inputs/external.key` |
-| Both external protocols | `--provider external --external-api both --external-openai-url https://openai.example/v1 --external-messages-url https://messages.example --external-key-file /root/enmaas-inputs/external.key` |
-
-Replace example URLs with the reviewed provider endpoints. For direct OpenAI plus an external provider, supply both sets of arguments. One external key must authorize both endpoints when selecting `both`; Messages defaults to `x-api-key`, with `--external-messages-auth bearer` available where required. Provider discovery remains authenticated and may fail if the supplied key or endpoint is invalid.
+For an already installed mock gateway, use [provider replacement](providers.md#convert-one-profile-to-a-real-provider).
+Do not rerun the installer: replacement updates the selected provider in place
+and preserves identities, budgets and history. Stop the mock benchmark first.
 
 ## Optional external databases
 
@@ -73,3 +74,16 @@ This asks for final confirmation. Mock mode needs no real provider keys. For rea
 providers, use `--mode real` instead of the two mock flags and let the gateway
 installer prompt for providers and credentials. Do not run the mock-only benchmark
 after configuring real providers. This is not an upgrade command.
+
+## After the benchmark: use real providers
+
+Stop the traffic runner and save its report, then follow
+[replace mock profiles](providers.md#convert-one-profile-to-a-real-provider).
+Those commands update an installed gateway; they do not rerun installation.
+They preserve users, keys, budgets, history and remote-service connections.
+Review retained test prices before sending real requests.
+
+For a fresh deployment with real providers, follow the
+[production quickstart](../../quickstarts/remote-gateway-pricetag/README.md) or
+[remote-services installation](../../quickstarts/remote-gateway-pricetag/full-deployment.md)
+instead. Neither requires mock providers or benchmark accounts.

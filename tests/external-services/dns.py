@@ -16,6 +16,9 @@ import secrets
 import stat
 import subprocess
 
+spec=importlib.util.spec_from_file_location('external_aws_environment',Path(__file__).resolve().parents[2]/'scripts/aws/environment.py')
+aws_environment=importlib.util.module_from_spec(spec);spec.loader.exec_module(aws_environment)
+
 spec=importlib.util.spec_from_file_location('dns_registry',Path(__file__).with_name('deployments.py'))
 registry=importlib.util.module_from_spec(spec);spec.loader.exec_module(registry)
 ROLES=('gateway','keycloak','observability')
@@ -62,7 +65,7 @@ class Aws:
         command=['aws','--no-cli-pager','--no-paginate','--profile',self.manifest['aws_profile'],
                  '--region',self.manifest['region'],'--output','json',service,action,
                  '--cli-input-json',json.dumps(options)]
-        result=subprocess.run(command,capture_output=True,text=True,timeout=60)
+        result=subprocess.run(command,capture_output=True,text=True,timeout=60,env=aws_environment.environment(self.manifest['aws_profile']))
         if result.returncode:raise ValueError('AWS DNS operation failed; inspect the journal before retrying')
         return json.loads(result.stdout)
 
@@ -96,22 +99,21 @@ def load_journal(path,manifest):
     return journal
 
 
-def main():
-    parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action',choices=('plan','create','status','delete'))
-    parser.add_argument('--manifest',type=Path,required=True)
-    parser.add_argument('--journal',type=Path,required=True)
-    for role in ROLES:parser.add_argument('--'+role+'-ip')
-    parser.add_argument('--confirm',help='ACTION DEPLOYMENT_ID ACCOUNT_ID; required for cloud writes')
-    args=parser.parse_args();manifest=registry.load(args.manifest)
-    if not manifest['zone_id']:parser.error('selected deployment has no DNS configuration')
+def invalid_operation(message):
+    raise ValueError(message)
+
+
+def execute(args, manifest, *, invalid=invalid_operation):
+    """Shared checked operation for CLI and deployment handoff; no scope inference."""
+    if not manifest['zone_id']:invalid('selected deployment has no DNS configuration')
+    registry.validate(manifest)
     addresses={role:getattr(args,role+'_ip') for role in ROLES}
     if args.journal.exists() or args.journal.is_symlink():
         journal=load_journal(args.journal,manifest)
         if any(addresses.values()) and addresses!=journal['addresses']:
-            parser.error('addresses differ from the immutable journal')
+            invalid('addresses differ from the immutable journal')
     else:
-        if args.action not in ('plan','create'):parser.error('existing ownership journal required')
+        if args.action not in ('plan','create'):invalid('existing ownership journal required')
         journal={'version':1,'manifest':manifest,'addresses':addresses,'nonce':secrets.token_hex(16)}
         journal['records']=records(manifest,addresses,journal['nonce'])
     aws=Aws(manifest)
@@ -123,23 +125,34 @@ def main():
     exact=sorted(json.dumps(r,sort_keys=True) for r in live)==sorted(json.dumps(r,sort_keys=True) for r in expected)
     state='matching' if exact else 'absent' if not live else 'conflict'
     if args.action in ('plan','status'):
-        print(json.dumps({'deployment':manifest['id'],'state':state,'records':expected,
-                          'delegation_verified':False,'changes_made':False},indent=2));return
+        return {'deployment':manifest['id'],'state':state,'records':expected,
+                'delegation_verified':False,'changes_made':False}
     if args.confirm!=args.action+' '+manifest['id']+' '+manifest['account']:
-        parser.error('supply the exact action, deployment ID and account confirmation')
+        invalid('supply the exact action, deployment ID and account confirmation')
     if args.action=='create':
         if exact:
-            print('Records already match the journal; no changes.');return
+            return {'state':'matching','changes_made':False,'delegation_verified':False}
         if live:raise ValueError('DNS collision; existing records will not be overwritten')
         if not args.journal.exists():write_journal(args.journal,journal)
         batch={'Changes':[{'Action':'CREATE','ResourceRecordSet':row} for row in expected]}
     else:
         if not live:
-            print('Journaled records absent; no DNS changes. Keep the journal for audit.');return
+            return {'state':'absent','changes_made':False,'delegation_verified':False}
         batch=delete_batch(expected,live)
     changed=aws.call('route53','change-resource-record-sets',HostedZoneId=manifest['zone_id'],ChangeBatch=batch)
-    print(json.dumps({'change':changed['ChangeInfo'],'journal':str(args.journal),
-                      'note':'Wait for DNS propagation; zone and journal retained.'},indent=2))
+    return {'change':changed['ChangeInfo'],'journal':str(args.journal),'changes_made':True,
+            'delegation_verified':False,'note':'Wait for DNS propagation; zone and journal retained.'}
+
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('action',choices=('plan','create','status','delete'))
+    parser.add_argument('--manifest',type=Path,required=True)
+    parser.add_argument('--journal',type=Path,required=True)
+    for role in ROLES:parser.add_argument('--'+role+'-ip')
+    parser.add_argument('--confirm',help='ACTION DEPLOYMENT_ID ACCOUNT_ID; required for cloud writes')
+    args=parser.parse_args();manifest=registry.load(args.manifest)
+    print(json.dumps(execute(args,manifest,invalid=parser.error),indent=2))
 
 
 if __name__=='__main__':

@@ -19,6 +19,8 @@ spec = importlib.util.spec_from_loader(loader.name, loader)
 vm = importlib.util.module_from_spec(spec); loader.exec_module(vm)
 spec = importlib.util.spec_from_file_location('cleanup_rds', HERE/'rds.py')
 rds = importlib.util.module_from_spec(spec); spec.loader.exec_module(rds)
+spec = importlib.util.spec_from_file_location('cleanup_network', HERE/'vpc-inspect.py')
+network_journal = importlib.util.module_from_spec(spec); spec.loader.exec_module(network_journal)
 ROLES = {'gateway': 'remote-gateway', 'keycloak': 'keycloak', 'observability': 'observability'}
 
 
@@ -42,6 +44,8 @@ def inventory(manifest, journals, resources):
                 raise ValueError('resource shared across roles')
             if kind == 'groups' and resource.get('OwnerId') != manifest['account']:
                 raise ValueError('security group account differs')
+            if kind == 'keys' and 'KeyPairId' in state and resource.get('KeyPairId') != state['KeyPairId']:
+                raise ValueError('key-pair identity differs from its import journal')
             consumed[kind].add(identifier)
             rows.append({'role': role, 'kind': kind, 'id': identifier})
         instance = resources['instances'][state['InstanceId']]
@@ -189,7 +193,7 @@ def rds_inventory(manifest, journal, aws):
         'retention_decision_required': ['final snapshot', 'automated backups'],
         'note': 'Managed-secret reference only; no secret read or independent deletion authorized.'}
 
-def teardown_plan(rows, dependencies, database, references=None):
+def teardown_plan(rows, dependencies, database, references=None, network=None):
     """Order manual review from live-verified inventory; never authorize deletion."""
     def ids(kind):
         return sorted(row['id'] for row in rows if row['kind'] == kind)
@@ -219,6 +223,8 @@ def teardown_plan(rows, dependencies, database, references=None):
          'required': 'reinspect interfaces and security-group references after service deletion; never delete unowned interfaces or edit foreign groups'},
         {'stage': 'imported-key-pairs', 'key_pairs': ids('keys'),
          'required': 'confirm no surviving instances depend on these imported public keys'},
+        {'stage': 'dedicated-vpc', 'creation_records': network, 'deletion_authorized': False,
+         'required': 'compare live VPC ownership and every subnet, route-table association, internet-gateway attachment, endpoint, interface and service dependency with the creation journal; reconcile uncertain operations and unrecorded resources before any network deletion'},
         {'stage': 'local-state', 'automatic_deletion': False,
          'required': 'retain journals and keys until cloud cleanup and retained-data choices are reconciled; remove local browser trust separately'},
     ]
@@ -226,32 +232,51 @@ def teardown_plan(rows, dependencies, database, references=None):
             'unresolved_interfaces': unresolved,
             'security_group_references': references,
             'unverified': ['DNS and IAM ownership/dependencies', 'cross-account/peered-VPC security-group references',
-                           'cross-region/AWS Backup recovery points', 'partial-launch recovery'],
+                           'cross-region/AWS Backup recovery points', 'live dedicated-VPC ownership and dependencies', 'partial-launch recovery'],
             'note': 'Review plan only. No shell deletion commands or deletion authorization are produced.'}
+
+
+def collect_resources(aws, manifest):
+    """Reject truncated/ambiguous AWS responses before ownership comparisons."""
+    filters = [{'Name': 'tag:enmaas:run', 'Values': [manifest['id']]}]
+    resources = {}
+    for kind, action, field, key in (
+            ('instances', 'describe-instances', 'Reservations', 'InstanceId'),
+            ('groups', 'describe-security-groups', 'SecurityGroups', 'GroupId'),
+            ('keys', 'describe-key-pairs', 'KeyPairs', 'KeyName'),
+            ('volumes', 'describe-volumes', 'Volumes', 'VolumeId')):
+        response = aws.call('ec2', action, filters=filters)
+        if response.get('NextToken'):
+            raise ValueError('resource inventory is incomplete: '+kind)
+        rows = response[field]
+        if kind == 'instances':
+            if any(row.get('OwnerId') != manifest['account'] for row in rows):
+                raise ValueError('instance reservation account differs')
+            rows = [item for row in rows for item in row['Instances']]
+        resources[kind] = {}
+        for row in rows:
+            identifier = row[key]
+            if not isinstance(identifier, str) or not identifier or identifier in resources[kind]:
+                raise ValueError('missing or duplicate resource identity: '+kind)
+            resources[kind][identifier] = row
+    return resources
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('manifest', type=Path)
+    parser.add_argument('--network-journal', type=Path, help='optional dedicated-network creation records; not live deletion authority')
     parser.add_argument('--rds-journal', type=Path, help='optional private RDS creation journal')
     parser.add_argument('--state-dir', type=Path, default=Path('.state'))
     parser.add_argument('--teardown-plan', action='store_true', help='include an ordered manual review plan; performs no deletion')
     args = parser.parse_args()
     manifest = registry.load(args.manifest)
+    network = network_journal.inspect(args.network_journal, manifest) if args.network_journal else None
     journals = {role: registry.read_private_json(args.state_dir/(manifest['id']+'-'+role+'.json'))
                 for role in ROLES}
     aws = vm.Aws(manifest['region'], manifest['aws_profile'], False)
     vm.check_identity(aws, manifest['account'])
-    filters = [{'Name': 'tag:enmaas:run', 'Values': [manifest['id']]}]
-    reservations = aws.call('ec2', 'describe-instances', filters=filters)['Reservations']
-    if any(row.get('OwnerId') != manifest['account'] for row in reservations):
-        raise ValueError('instance reservation account differs')
-    resources = {'instances': {item['InstanceId']: item for row in reservations for item in row['Instances']}}
-    for kind, action, result, key in (
-            ('groups', 'describe-security-groups', 'SecurityGroups', 'GroupId'),
-            ('keys', 'describe-key-pairs', 'KeyPairs', 'KeyName'),
-            ('volumes', 'describe-volumes', 'Volumes', 'VolumeId')):
-        resources[kind] = {item[key]: item for item in aws.call('ec2', action, filters=filters)[result]}
+    resources = collect_resources(aws, manifest)
     dependency_groups = set(resources['groups'])
     database = None
     if args.rds_journal:
@@ -268,11 +293,11 @@ def main():
                       'region': manifest['region'], 'ec2_inventory': ec2_inventory,
                       'network_dependencies': dependencies,
                       'security_group_references': references,
-                      'rds_inventory': database, 'deletion_enabled': False,
+                      'rds_inventory': database, 'network_creation_records': network, 'deletion_enabled': False,
                       'remaining': ['backup retention decisions and cross-region/AWS Backup inventory', 'DNS and IAM inventory', 'network dependency reconciliation',
                                     'partial-launch/orphan reconciliation', 'live IAM deny tests']}
     if args.teardown_plan:
-        result['teardown_plan'] = teardown_plan(ec2_inventory, dependencies, database, references)
+        result['teardown_plan'] = teardown_plan(ec2_inventory, dependencies, database, references, network)
     print(json.dumps(result, indent=2))
 
 

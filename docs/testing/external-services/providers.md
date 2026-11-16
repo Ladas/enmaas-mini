@@ -1,8 +1,26 @@
 # Mock and real providers
 
+This is the **testing-to-real-provider** flow for an installed RHEL gateway.
+For a new deployment with real providers from the start, use the
+[one-node quickstart](../../quickstarts/remote-gateway-pricetag/README.md) or
+[gateway with remote services](../../quickstarts/remote-gateway-pricetag/full-deployment.md).
+The provider-management commands are the same in both layouts; remote SSO,
+observability and database settings do not change when a provider is replaced.
+
+## Choose the operation
+
+| Starting point | Operation |
+| --- | --- |
+| Fresh production host | Use the production quickstart and configure real providers during installation. |
+| Installed mock gateway | Stop the benchmark, then replace one or both provider profiles below. |
+| Installed real gateway | Use the same replacement commands to change credentials, endpoints or models. |
+
+Replacing a provider does not change the remote OIDC issuer, telemetry receiver
+or database configuration. Those services remain connected.
+
 ## Profiles and ownership
 
-The real installer supports two profiles: `openai` (OpenAI directly) and `external` (OpenAI-compatible and/or Anthropic Messages APIs). The default `--mode mock` configuration uses **the same profile names, model aliases and credential slots** with private deterministic backends. It is intended for testing replacement without changing users, budgets or keys.
+The installer supports two profiles: `openai` (OpenAI directly) and `external` (OpenAI-compatible and/or Anthropic Messages APIs). When explicitly selected, `--mode mock` uses **the same profile names, model aliases and credential slots** with private deterministic backends. Real-provider mode remains the installer default.
 
 | Profile | Example alias | Mock destination |
 | --- | --- | --- |
@@ -36,7 +54,36 @@ Enter reviewed HTTPS endpoint(s) and the key at the hidden prompt. Discovery lis
 
 ## Convert one profile to a real provider
 
-**Stop benchmarking first.** Real requests may incur charges. Run these commands on the gateway; select only the profile you intend to replace.
+**Stop benchmarking first and save its report.** For a detached run, use its
+printed `systemctl stop` command, then verify `cleanup.json` reports successful
+cleanup before proceeding. If cleanup failed, resolve that failure before replacing
+providers. See [benchmark completion and cleanup](benchmark.md#run-independently-of-the-ssh-connection).
+Real requests may incur charges.
+For a coordinated installation, reprint commands from the saved configuration on
+the workstation:
+
+```sh
+python3 tests/external-services/services.py --config "$SERVICE_CONFIG" --access
+```
+
+Under `provider_replacement`, copy the command for the chosen profile. It connects
+to the recorded gateway and checkout with verified SSH and opens hidden credential
+prompts. For a single external protocol, change `--api both` to `--api openai` or
+`--api anthropic`. No replacement runs merely by printing this summary.
+
+For manual installation, SSH to the gateway and run from the same installed
+repository directory used for installation. Select only the profile you intend to replace; do not rerun the
+fresh-install command. From the workstation, use the gateway SSH settings saved
+for this deployment (not the Keycloak or observability host):
+
+```sh
+ssh -i "$SSH_KEY" "$RHEL_HOST"
+```
+
+On the gateway, change into the installed checkout. For a coordinated installation,
+its path is `/opt/enmaas-mini/<deployment-id>` from the service configuration; for
+a manual installation, use the directory where you ran the installer. Run the
+following commands there.
 
 Direct OpenAI, preserving the existing model selection:
 
@@ -50,15 +97,47 @@ External provider, replacing endpoints/key and refreshing its model selection:
 sudo python3 scripts/pricetag/providers external --api both --replace --refresh-models
 ```
 
-Use `--api openai` or `--api anthropic` for a single protocol. Review `configs/pricetag/provider-models.json` first. The helper performs discovery, writes the selected profile's catalog/routing/credential references, restarts Praxis and checks readiness. Failed activation rolls back. Users, keys, budgets and usage history remain; historical mock data is not turned into real usage or erased.
+Use `--api openai` or `--api anthropic` for a single protocol. Review `configs/pricetag/provider-models.json` first. The helper performs discovery, writes the selected profile's catalog/routing/credential references, restarts Praxis and checks readiness. Failed activation attempts to restore the previous gateway files and restart it; a recovery failure reports the private backup path. New price records and old credential versions can remain for review. Users, keys, budgets and usage history remain; historical mock data is not turned into real usage or erased.
 
-For unattended replacement, add `--key-file /root/provider-keys/NAME.key` and the explicit external `--openai-url`/`--anthropic-url` arguments. Key files must meet the helper's root-owned private-file checks. Never pass credential values on the command line.
+### Headless replacement
+
+Prepare root-owned private credential files through your secret-delivery process.
+Use mode `0600`; never put credential values on the command line. Run either or
+both commands, depending on which profiles you want to replace:
+
+```sh
+sudo python3 scripts/pricetag/providers openai --replace \
+  --key-file /root/enmaas-inputs/openai.key
+```
+
+```sh
+sudo python3 scripts/pricetag/providers external --api both \
+  --replace --refresh-models \
+  --openai-url https://openai.example/v1 \
+  --anthropic-url https://messages.example \
+  --key-file /root/enmaas-inputs/external.key
+```
+
+Replace the example URLs. For one external protocol, select `--api openai` or
+`--api anthropic` and supply only its URL. For both protocols, the key must be
+authorized at both endpoints. Messages uses `x-api-key` by default; select
+`--messages-auth bearer` only when required by your provider.
+
+### Verify the replacement
 
 ```sh
 sudo python3 scripts/pricetag/providers list
 ```
 
-Confirm the new catalog and make an intentional small inference request. Refresh the local harness configuration after model changes. The load runner must refuse once either profile uses real credentials or endpoints, including a mixed mock/real deployment. Do not weaken that guard to benchmark a paid upstream.
+Check the effective rates in PriceTag before inference; retained prices may be
+test overrides. Use [pricing management](../../quickstarts/remote-gateway-pricetag/providers.md)
+to review model limits and prices. Refresh the [client configuration](../../quickstarts/remote-gateway-pricetag/clients.md)
+after model changes, make one intentional small authenticated request, and verify
+its model and usage in PriceTag. Gateway readiness alone does not prove that the
+upstream accepts inference with the supplied key.
+
+The load runner must refuse once either profile uses real credentials or endpoints,
+including a mixed mock/real deployment. Do not weaken that guard to benchmark a paid upstream.
 
 The unselected profile remains mocked until replaced. The private mock service may remain running but is no longer routed by a fully converted deployment; stopping/removing that unused service is a separate reviewed cleanup step. For real demonstrations, prefer a fresh deployment so mock history cannot be mistaken for actual spend.
 

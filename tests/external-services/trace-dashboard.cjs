@@ -13,16 +13,16 @@ const pin=createHash('sha256').update(cert.publicKey.export({type:'spki',format:
  const context=await browser.newContext();const page=await context.newPage();
  context.setDefaultTimeout(15000);
  try {
-  for(let i=0;i<10;i++) assert.equal((await context.request.get('https://localhost:28443/login')).status(),200);
+  // Requires actual mock inference; login traffic cannot satisfy this assertion.
   stage='login';await page.goto('https://localhost:19443/');
   await page.locator('#username').fill('admin');await page.locator('#password').fill(user.admin);
   await page.locator('#kc-login').click();
   await page.waitForURL(url=>url.origin==='https://localhost:19443');
-  stage='search';const search=await context.request.get('https://localhost:19443/proxy/globaldatasources/tempo/api/search?q='+encodeURIComponent('{resource.service.name =~ "enmaas-gateway.*"}')+'&limit=20');
+  stage='search';const search=await context.request.get('https://localhost:19443/proxy/globaldatasources/tempo/api/search?q='+encodeURIComponent('{resource.service.name =~ "enmaas-gateway.*" && span.enmaas.request.kind = "inference"}')+'&limit=20');
   assert.equal(search.status(),200);const results=await search.json();
   assert(results.traces?.length,'real gateway traces available');
   stage='table';await page.goto('https://localhost:19443/projects/praxis/dashboards/enmaas-traces');
-  await page.getByText('Recent gateway traces',{exact:true}).waitFor();
+  await page.getByText('Recent inference traces',{exact:true}).waitFor();
   const row=page.getByRole('row').nth(1);
   await row.waitFor();
   stage='detail';const detail=page.waitForResponse(r=>/\/api\/(?:v2\/)?traces\//.test(r.url()) && r.status()===200).catch(()=>null);

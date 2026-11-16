@@ -26,6 +26,16 @@ sudo python3 tests/external-services/keycloak-host.py \
 
 The generator creates a dedicated realm, immutable UUIDs for three test users, separate gateway/observability client secrets, and Quadlet definitions. Passwords remain in the private `credentials.json`; they are not printed. Existing inputs are never overwritten.
 
+The initial realm contains only the three personas. **The full 10,000-user setup is not ready yet.** The [issuer population command](keycloak-users.md)
+passed a local 10,000-user test with a disposable development database.
+PostgreSQL-backed RHEL execution, cross-host PriceTag mapping and account lifecycle
+acceptance remain pending. Do not enlarge `realm.json` to carry it:
+[Podman limits individual secrets](https://docs.podman.io/en/latest/markdown/podman-secret-create.1.html).
+Preflight rejects empty secrets or files above the conservative 500,000-byte bound
+before host changes. Bulk users need a resumable Keycloak administrative API step,
+followed by matching immutable-identity provisioning through PriceTag's API.
+Increasing the import size does not provide that identity mapping.
+
 Supply a matching server certificate/key and public issuer CA, owned by root with mode `0600`. The server certificate must cover the issuer IP and `localhost` (the loopback administration endpoint). Generate/sign certificates on the workstation: do not copy the CA signing key to this VM.
 
 For a DNS issuer with private peer connections, follow the optional
@@ -58,32 +68,81 @@ Do not use the temporary bootstrap administrator as a permanent operating accoun
 
 ## Connect the other services
 
-The generator creates separate gateway and observability client files. From the **administrator workstation**, transfer only those files through SSH to their consuming hosts. The commands refuse existing destination files and do not print secret values:
+The generator creates separate gateway and observability client files. Transfer
+only those files from the **operator workstation** with the helper below. It checks
+source ownership/permissions and successful completion before sending data, then
+installs the destination atomically without replacing existing files. Secret values
+are never printed or put in command arguments.
+
+Use a private `KNOWN_HOSTS` file containing host keys whose fingerprints you have
+verified through a trusted channel. `ssh-keyscan` alone does not authenticate a
+host. The helper uses strict host-key checking and noninteractive SSH; unlock the
+selected SSH key in your agent beforehand if necessary.
+
+Prepare `/root/enmaas-inputs` on each consuming host, owned by root with mode
+`0700`, using the same verified SSH connection. Then run:
+
+```sh
+python3 tests/external-services/transfer-client.py \
+  --issuer "$KEYCLOAK_RHEL_HOST" --destination "$GATEWAY_RHEL_HOST" \
+  --client gateway --ssh-key "$SSH_KEY" --known-hosts "$KNOWN_HOSTS" &&
+python3 tests/external-services/transfer-client.py \
+  --issuer "$KEYCLOAK_RHEL_HOST" --destination "$OBSERVABILITY_RHEL_HOST" \
+  --client observability --ssh-key "$SSH_KEY" --known-hosts "$KNOWN_HOSTS"
+```
+
+Each host argument is `user@IPv4`. Both local SSH files must be user-owned,
+regular files at absolute paths with mode `0600`. The helper reads only the fixed
+client files, never the issuer's full credential file or bootstrap password. It
+does not change host trust or provision directories.
+
+On the gateway, copy its existing **public issuer CA** into the path referenced by
+the OIDC file:
+
+```sh
+sudo sh -c 'test ! -e /root/enmaas-inputs/issuer-ca.pem && install -m 0600 /root/enmaas-tls/issuer-ca.pem /root/enmaas-inputs/issuer-ca.pem'
+```
+
+If SSH fails or times out, inspect the destination before retrying: a completed
+write may have lost its acknowledgement. Existing files are never overwritten.
+The helper's remote read/write contract is tested locally; actual SSH/sudo and
+RHEL acceptance remain part of the three-host qualification.
+
+Continue with [gateway OIDC setup](oidc.md) and the [observability installer](observability-rhel.md). Provision the UUIDs recorded in `identities.json` through the partner API before attempting gateway SSO; matching email addresses alone do not establish identity. Observability uses its separate client and explicit administrator group.
+
+## Retrieve one test-user password
+
+Run on the issuer host from the installed checkout. This prints only the selected
+user's **saved initial password**, and only when `--stdout` is supplied. The input
+directory must be root-owned with mode `0700`; both JSON files must be root-owned
+with mode `0600`. Symlinked input directories and files are rejected:
+
+
+```sh
+sudo python3 tests/external-services/keycloak-password.py --user alice --stdout
+```
+
+Replace `alice` with another identity in `identities.json`. The helper rejects
+service-secret names and the bootstrap administrator. It does not reset a password
+or query its current value from Keycloak. If a user has changed their password,
+the saved initial value is no longer a login credential.
+
+To copy Alice's saved password on macOS without displaying it, run from the
+operator workstation with the verified SSH settings used above:
 
 ```sh
 (
-  set -euo pipefail
-  SSH_OPTS=(-i "$SSH_KEY" -o IdentitiesOnly=yes)
-  ssh "${SSH_OPTS[@]}" "$GATEWAY_RHEL_HOST" \
-    'sudo install -d -m 0700 /root/enmaas-inputs'
-  ssh "${SSH_OPTS[@]}" "$OBSERVABILITY_RHEL_HOST" \
-    'sudo install -d -m 0700 /root/enmaas-inputs'
-  ssh "${SSH_OPTS[@]}" "$KEYCLOAK_RHEL_HOST" \
-    'sudo cat /root/enmaas-keycloak-inputs/gateway-oidc.json' | \
-    ssh "${SSH_OPTS[@]}" "$GATEWAY_RHEL_HOST" \
-    "sudo sh -c 'umask 077; set -C; cat > /root/enmaas-inputs/oidc.json'"
-  ssh "${SSH_OPTS[@]}" "$KEYCLOAK_RHEL_HOST" \
-    'sudo cat /root/enmaas-keycloak-inputs/observability-client-secret' | \
-    ssh "${SSH_OPTS[@]}" "$OBSERVABILITY_RHEL_HOST" \
-    "sudo sh -c 'umask 077; set -C; cat > /root/enmaas-inputs/observability-client-secret'"
-  ssh "${SSH_OPTS[@]}" "$GATEWAY_RHEL_HOST" \
-    "sudo sh -c 'test ! -e /root/enmaas-inputs/issuer-ca.pem && install -m 0600 /root/enmaas-tls/issuer-ca.pem /root/enmaas-inputs/issuer-ca.pem'"
+  set -o pipefail
+  ssh -i "$SSH_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+    -o "UserKnownHostsFile=$KNOWN_HOSTS" "$KEYCLOAK_RHEL_HOST" \
+    'cd ~/enmaas-mini && sudo -n python3 tests/external-services/keycloak-password.py --user alice --stdout' | pbcopy
 )
 ```
 
-Do not transfer the issuer's entire `credentials.json` or its bootstrap administrator password. If a pipe fails, inspect the destination before retrying; it may contain an incomplete file. Both configuration validators reject empty or malformed inputs before installation.
-
-Continue with [gateway OIDC setup](oidc.md) and the [observability installer](observability-rhel.md). Provision the UUIDs recorded in `identities.json` through the partner API before attempting gateway SSO; matching email addresses alone do not establish identity. Observability uses its separate client and explicit administrator group.
+Use the installed checkout path if it differs. Paste only into the expected test
+issuer login, then clear the clipboard with `printf '' | pbcopy`. Other platforms
+can pipe the same SSH output to their clipboard/password tool. Do not print the
+entire `credentials.json` or paste passwords into test reports.
 
 ## Inspect or recover
 

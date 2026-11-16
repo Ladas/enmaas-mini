@@ -17,7 +17,7 @@ SCRIPT = ROOT/'tests/external-services/aws-discover'
 
 
 class Discovery(unittest.TestCase):
-    def exercise(self, mode='normal', answers=None):
+    def exercise(self, mode='normal', answers=None, select_zone=False):
         answers = answers if answers is not None else ['synthetic-access-only', 'synthetic-secret-only', 'synthetic-token-only']
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory); cli=root/'aws'; calls=root/'calls.jsonl'
@@ -36,6 +36,8 @@ if 'get-caller-identity' in args:
  if os.environ['TEST_MODE']=='identity-denied':sys.exit(1)
  print(json.dumps({'Account':'123456789012','Arn':'arn:aws:iam::123456789012:user/test'}))
 elif 'list-hosted-zones' in args and os.environ['TEST_MODE']=='zone-denied':sys.exit(1)
+elif 'list-hosted-zones' in args and os.environ['TEST_MODE']=='choose-zone':
+ print(json.dumps({'HostedZones':[{'Id':'/hostedzone/Z123','Name':'example.test.','Config':{'PrivateZone':False}}]}))
 else:print('[]')
 ''')
             cli.chmod(0o700)
@@ -44,9 +46,9 @@ else:print('[]')
                  'AWS_PROFILE':'old-profile','AWS_SECURITY_TOKEN':'stale-token'}
             child,terminal=pty.fork()
             if child==0:
-                os.execvpe('bash',['bash','-x',str(SCRIPT),'eu-west-1'],env)
+                os.execvpe('bash',['bash','-x',str(SCRIPT),'eu-west-1']+(['--select-zone'] if select_zone else []),env)
             output=b'';finished=False;index=0;deadline=time.monotonic()+10
-            prompts=(b'AWS access key ID:',b'AWS secret access key:',b'AWS session token')
+            prompts=(b'AWS access key ID:',b'AWS secret access key:',b'AWS session token',b'Public zone [0]:')
             try:
                 while time.monotonic()<deadline:
                     if select.select([terminal],[],[],.05)[0]:
@@ -56,7 +58,7 @@ else:print('[]')
                             raise
                         if not part:break
                         output+=part
-                    if index<len(answers) and prompts[index] in output and not termios.tcgetattr(terminal)[3]&termios.ECHO:
+                    if index<len(answers) and prompts[index] in output and (index==3 or not termios.tcgetattr(terminal)[3]&termios.ECHO):
                         answer=answers[index]
                         os.write(terminal,(answer if answer=='\x03' else answer+'\n').encode());index+=1
                 while time.monotonic()<deadline:
@@ -83,6 +85,17 @@ else:print('[]')
         for call,action in zip(calls,('get-caller-identity','list-hosted-zones','list-domains','describe-vpcs','describe-subnets','describe-instances')):
             self.assertIn(action,call)
             self.assertEqual(call[call.index('--region')+1],'us-east-1' if action=='list-domains' else 'eu-west-1')
+
+    def test_optional_zone_picker_only_prints_nonsecret_selection(self):
+        answers=['synthetic-access-only','synthetic-secret-only','synthetic-token-only','1']
+        code,text,calls=self.exercise('choose-zone',answers,select_zone=True)
+        self.assertEqual(code,0,text);self.assertEqual(len(calls),6)
+        self.assertIn('export ZONE_ID=Z123',text)
+        self.assertIn('export DNS_DOMAIN=example.test',text)
+        self.assertTrue(all('change-resource-record-sets' not in call for call in calls))
+        code,text,_=self.exercise('choose-zone',answers[:-1]+['99'],select_zone=True)
+        self.assertEqual(code,1,text)
+        self.assertNotIn('export ZONE_ID=Z123',text)
 
     def test_permission_failure_is_partial_not_empty_success(self):
         code,text,calls=self.exercise('zone-denied')

@@ -32,6 +32,17 @@ class Metrics(unittest.TestCase):
             self.assertNotIn('/var',str(payload))
             self.assertNotIn('process',str(payload))
 
+    def test_host_aliases_are_distinct_and_bounded(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);self.fixture(root)
+            for alias in ('gateway-1','gateway-2'):
+                payload=host.sample(root,host_id=alias)
+                for metric in payload['resourceMetrics'][0]['scopeMetrics'][0]['metrics']:
+                    for point in metric.get('gauge',metric.get('sum',{}))['dataPoints']:
+                        self.assertIn({'key':'host','value':{'stringValue':alias}},point['attributes'])
+            for alias in ('', 'https://private.example', 'a'*41, 'user@example.test'):
+                with self.assertRaises(ValueError):host.sample(root,host_id=alias)
+
     def test_invalid_kernel_data_and_endpoint_fail_closed(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d);self.fixture(root)

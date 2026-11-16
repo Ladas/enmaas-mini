@@ -6,6 +6,11 @@ from pathlib import Path
 import tempfile
 import subprocess
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
+import sys
+import contextlib
+import io
 
 spec = importlib.util.spec_from_file_location('deployments', Path(__file__).with_name('deployments.py'))
 deployments = importlib.util.module_from_spec(spec)
@@ -13,6 +18,38 @@ spec.loader.exec_module(deployments)
 
 
 class Deployments(unittest.TestCase):
+    def test_service_access_binds_config_to_deployment_and_ssh_key(self):
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('access_services',Path(__file__).with_name('test_services.py'))
+        cases=importlib.util.module_from_spec(spec);spec.loader.exec_module(cases)
+        config=cases.Services().config()
+        value=deployments.new('123456789012','eu-central-1',config['ssh_key'],'lab',group='lab')
+        value['id']=config['deployment']
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'services.json'
+            path.write_text(json.dumps(config));path.chmod(0o600)
+            with patch.object(subprocess,'run') as run:
+                result=deployments.service_access(value,path)
+            run.assert_not_called()
+            self.assertEqual(result['deployment'],value['id'])
+            self.assertFalse(result['live_verified'])
+            manifest=Path(tmp)/'manifest.json'
+            manifest.write_text(json.dumps(value));manifest.chmod(0o600)
+            output=io.StringIO()
+            with patch.object(sys,'argv',['deployments.py','access',str(manifest),'--service-config',str(path)]),contextlib.redirect_stdout(output):
+                deployments.main()
+            self.assertEqual(json.loads(output.getvalue()),result)
+            path.write_text('[]')
+            with self.assertRaises(ValueError):deployments.service_access(value,path)
+            path.write_text(json.dumps(config))
+            self.assertIn('https://192.0.2.12:8443/login',json.dumps(result))
+            for field,other in (('deployment','em-lab-000000000000'),('ssh_key','/tmp/other')):
+                modified=dict(config);modified[field]=other
+                path.write_text(json.dumps(modified))
+                with self.assertRaises(ValueError):deployments.service_access(value,path)
+            path.write_text(json.dumps(config));path.chmod(0o644)
+            with self.assertRaises(ValueError):deployments.service_access(value,path)
+
     def test_trust_policy_requires_exact_same_account_principal_and_user_mfa(self):
         value=self.sample()
         arn='arn:aws:iam::123456789012:user/operators/test-user'
@@ -78,6 +115,40 @@ class Deployments(unittest.TestCase):
             path.write_text(json.dumps(state))
             with self.assertRaises(ValueError):
                 deployments.summary(value, root)
+
+    def test_invalid_group_reports_group_before_constructing_id(self):
+        for group in ('', 'TOO-LONG-GROUP', None, 7):
+            if group is None:
+                continue  # None remains the legacy Python API, not CLI init.
+            with self.subTest(group=group), self.assertRaisesRegex(ValueError, 'Group'):
+                deployments.new('123456789012', 'eu-central-1', '/tmp/key', 'lab', group=group)
+
+    def test_dry_run_writes_nothing_and_missing_settings_fail_without_tty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            script = str(Path(deployments.__file__))
+            command = [sys.executable, script, '--registry', tmp+'/registry', 'init', '--dry-run']
+            result = subprocess.run(command, input='', capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('--group', result.stderr)
+            result = subprocess.run(command + ['--group', 'demo', '--account', '123456789012',
+                '--region', 'eu-central-1', '--aws-profile', 'scoped-lab', '--ssh-key-path', tmp+'/key'],
+                input='', capture_output=True, text=True, check=True)
+            report = json.loads(result.stdout)
+            self.assertFalse(report['aws_calls_made'])
+            self.assertFalse(report['files_written'])
+            self.assertFalse(report['permissions_verified'])
+            self.assertEqual(report['deployment']['group'], 'demo')
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+
+    def test_interactive_settings_do_not_require_exported_variables(self):
+        args = SimpleNamespace(group=None, account=None, region=None, aws_profile=None,
+                               ssh_key_path=None, zone_id='', domain='')
+        with patch.object(deployments.sys.stdin, 'isatty', return_value=True), patch(
+                'builtins.input', side_effect=['demo', '123456789012', '', 'scoped-lab', '']):
+            value = deployments.init_settings(args)
+        self.assertEqual(value['region'], 'eu-central-1')
+        self.assertEqual(value['aws_profile'], 'scoped-lab')
+        self.assertTrue(value['ssh_key_path'].endswith(value['id']))
 
     def sample(self):
         return deployments.new('123456789012', 'eu-central-1', '/tmp/test-key',
@@ -181,6 +252,56 @@ class Deployments(unittest.TestCase):
         self.assertEqual(dns['Resource'],'arn:aws:route53:::hostedzone/'+value['zone_id'])
         value['zone_id']=value['domain']=''
         self.assertFalse(any(action.startswith('route53:') for s in deployments.inspection_policy(value)['Statement'] for action in s['Action']))
+
+
+    def test_cli_save_list_show_policies_summary_and_selection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)/'registry'
+            script=str(Path(deployments.__file__))
+            def run(*args):
+                return subprocess.run([sys.executable,script,'--registry',str(root),*map(str,args)],
+                                      input='',capture_output=True,text=True,check=True).stdout
+            manifest=Path(run('init','--group','demo','--account','123456789012',
+                '--region','eu-central-1','--aws-profile','scoped-lab','--ssh-key-path',tmp+'/key').strip())
+            value=deployments.load(manifest)
+            self.assertEqual(json.loads(run('list'))['id'],value['id'])
+            self.assertEqual(json.loads(run('show',manifest)),value)
+            self.assertIn('export DEPLOYMENT_GROUP=demo',run('env',manifest))
+            self.assertEqual(json.loads(run('dns-policy',manifest))['Statement'],[])
+            self.assertTrue(json.loads(run('inspection-policy',manifest))['Statement'])
+            report=json.loads(run('summary',manifest,'--journals',tmp))
+            self.assertTrue(all(v['ApplyStatus']=='No launch journal' for v in report['vms']))
+            trust=json.loads(run('trust-policy',manifest,'--principal-arn','arn:aws:iam::123456789012:user/test'))
+            self.assertEqual(trust['Statement'][0]['Condition']['Bool']['aws:MultiFactorAuthPresent'],'true')
+
+    def test_schema_and_registry_directory_reject_unsafe_values(self):
+        for field,value in (('account',None),('region','bad'),('aws_profile','../profile'),
+                            ('ssh_key_path','relative'),('ssh_key_path','/tmp/key\n'),('tls','insecure')):
+            manifest=self.sample()
+            manifest[field]=value
+            with self.subTest(field=field,value=value),self.assertRaises(ValueError):
+                deployments.validate(manifest)
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)/'registry'
+            root.mkdir(mode=0o755)
+            with self.assertRaisesRegex(ValueError,'private'):
+                deployments.save(root,self.sample())
+            root.chmod(0o700)
+            value=self.sample()
+            path=root/(value['id']+'-gateway.json')
+            path.symlink_to(root/'missing')
+            with self.assertRaisesRegex(ValueError,'symbolic link'):
+                deployments.summary(value,root)
+
+    def test_interactive_blank_and_explicit_empty_settings_fail(self):
+        args=SimpleNamespace(group=None,account=None,region=None,aws_profile=None,
+                             ssh_key_path=None,zone_id='',domain='')
+        with patch.object(deployments.sys.stdin,'isatty',return_value=True),patch('builtins.input',return_value=''):
+            with self.assertRaisesRegex(ValueError,'value is required'):
+                deployments.init_settings(args)
+        args.group=''
+        with self.assertRaisesRegex(ValueError,'Empty --group'):
+            deployments.init_settings(args)
 
 
 if __name__ == '__main__':

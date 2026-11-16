@@ -25,9 +25,11 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args): pass
     def do_POST(self):
         type(self).requests += 1
-        self.rfile.read(int(self.headers['Content-Length']))
+        type(self).last = {'path':self.path,'headers':dict(self.headers),'body':json.loads(self.rfile.read(int(self.headers['Content-Length'])))}
         if self.mode == 'redirect':
             self.send_response(302); self.send_header('Location', '/other'); self.end_headers(); return
+        if self.mode == 'budget':
+            self.send_response(429); self.end_headers(); self.wfile.write(b'Monthly budget exceeded'); return
         if self.mode == 'rate':
             self.send_response(429); self.end_headers(); self.wfile.write(b'rate limited'); return
         if self.mode in ('slow','slow-headers'):
@@ -69,6 +71,32 @@ class Transport(unittest.TestCase):
         with transport.MockTransport(self.url, self.root/'ca.pem', ['synthetic-key'], 'mock/fixture',
                                      stream=mode=='stream') as client:
             return client(0, timeout)
+    def test_client_metadata_rejects_header_injection_and_mismatch(self):
+        for agents in ([], ['ok', 'extra'], ['bad\r\nInjected: yes'], [''], ['x'*257]):
+            with self.assertRaises(ValueError):
+                transport.MockTransport(self.url, self.root/'ca.pem', ['key'], 'fixture', user_agents=agents)
+
+    def test_client_profile_is_sent_without_forwarded_identity_headers(self):
+        Handler.mode = 'json'
+        with transport.MockTransport(self.url, self.root/'ca.pem', ['test-key'], 'fixture', stream=False,
+                user_agents=['opencode/1.0 enmaas-synthetic'],
+                profiles=[{'model':'external/model','api':'openai'}]) as client:
+            client(0, 1)
+        self.assertEqual(Handler.last['body']['model'], 'external/model')
+        self.assertEqual(Handler.last['headers']['User-Agent'], 'opencode/1.0 enmaas-synthetic')
+        self.assertEqual(Handler.last['path'], '/v1/chat/completions')
+        self.assertFalse(any(k.lower().startswith('x-forwarded') for k in Handler.last['headers']))
+
+    def test_anthropic_stream_usage_requires_complete_stream_and_exact_counts(self):
+        events = [{'type':'message_start','message':{'usage':{'input_tokens':2}}},
+                  {'type':'message_delta','usage':{'output_tokens':3}}, {'type':'message_stop'}]
+        def frame(rows): return b''.join(b'data: '+json.dumps(e).encode()+b'\n\n' for e in rows)
+        with transport.MockTransport(self.url, self.root/'ca.pem', ['test-key'], 'fixture') as client:
+            client.validate(frame(events), 'anthropic')
+            with self.assertRaises(transport.InvalidReply): client.validate(frame(events[:-1]), 'anthropic')
+            events[1]['usage']['output_tokens'] = 9
+            with self.assertRaises(transport.InvalidReply): client.validate(frame(events), 'anthropic')
+
     def test_json_and_stream_usage(self):
         for mode in ('json','stream'):
             result = self.request(mode)
@@ -116,4 +144,12 @@ class Transport(unittest.TestCase):
             with self.assertRaises(ValueError):
                 transport.MockTransport(url,self.root/'ca.pem',['key'],'mock/fixture')
 
-if __name__ == '__main__': unittest.main()
+
+    def test_budget_denial_requires_opt_in_and_has_distinct_reason(self):
+        with self.assertRaises(transport.UnexpectedResponse):self.request('budget')
+        Handler.mode='budget'
+        with transport.MockTransport(self.url,self.root/'ca.pem',['key'],'fixture',allow_budget_denials=True) as client:
+            self.assertEqual(client(0,1)['denial_reason'],'budget')
+        Handler.mode='rate'
+        with transport.MockTransport(self.url,self.root/'ca.pem',['key'],'fixture',allow_budget_denials=True) as client:
+            self.assertEqual(client(0,1)['denial_reason'],'rate_limit')

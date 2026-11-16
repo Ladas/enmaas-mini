@@ -58,7 +58,7 @@ create_secret() {
   ! as_service podman secret inspect "$1" >/dev/null 2>&1 || die "existing secret: $1"
   as_service podman secret create "$1" - <"$2" >/dev/null
 }
-for filename in oauth.cfg perses.yaml prometheus.yaml loki.yaml tempo.yaml collector.yaml; do
+for filename in oauth.cfg perses.yaml monitoring-rules.yaml prometheus.yaml loki.yaml tempo.yaml collector.yaml; do
   create_secret "lab-obs-${filename//./-}" "${inputs}/${filename}"
 done
 perses_assets="$(python3 - "$HERE/local.py" <<'PYASSETS'

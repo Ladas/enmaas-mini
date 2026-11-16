@@ -104,9 +104,11 @@ def main():
     parser.add_argument('--profile')
     parser.add_argument('--state-dir',type=Path,default=ROOT/'.state')
     parser.add_argument('--apply',action='store_true')
+    parser.add_argument('--confirm',help='exact account/region/run confirmation for headless apply')
     parser.add_argument('--issuer-path',choices=('public','private'),default='public',
         help='private requires a DNS issuer, matching certificate and private mappings in both clients')
     args=parser.parse_args()
+    if args.confirm is not None and not args.apply:parser.error('--confirm requires --apply')
     if not re.fullmatch(r'[0-9]{12}',args.account_id):parser.error('Expected explicit 12-digit account ID')
     if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9-]{1,60}',args.prefix):parser.error('Invalid run prefix')
     aws=vm.Aws(args.region,args.profile,args.apply)
@@ -117,7 +119,8 @@ def main():
         'MissingIngress':missing,'TelemetryAddress':hosts['observability']['PrivateIpAddress']+':24443'},indent=2))
     if not args.apply or not missing:return
     confirmation=f'grant peers {args.account_id} {args.region} {args.prefix}'
-    if input(f"Type exactly '{confirmation}': ")!=confirmation:raise ValueError('Confirmation did not match')
+    answer=args.confirm if args.confirm is not None else input(f"Type exactly '{confirmation}': ")
+    if answer!=confirmation:raise ValueError('Confirmation did not match')
     # Re-read account, ownership and current addresses after human review.
     current_hosts,current_missing=inspect(aws,args)
     if current_hosts!=hosts or current_missing!=missing:raise ValueError('Resources changed after review; rerun plan')

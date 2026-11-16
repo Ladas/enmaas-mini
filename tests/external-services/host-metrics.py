@@ -5,6 +5,7 @@ import ipaddress
 import json
 import math
 import os
+import re
 from pathlib import Path
 import ssl
 import time
@@ -25,7 +26,8 @@ def read(path):
     return text
 
 
-def sample(proc=Path('/proc'),now_ns=None):
+def sample(proc=Path('/proc'),now_ns=None,host_id='gateway'):
+    if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,39}',host_id):raise ValueError('Use a nonsecret host alias, at most 40 lowercase letters/digits/hyphens')
     now_ns=now_ns or time.time_ns()
     stat={line.split()[0]:line.split()[1:] for line in read(proc/'stat').splitlines() if line.split()}
     cpu=[int(value) for value in stat['cpu'][:8]]
@@ -48,7 +50,8 @@ def sample(proc=Path('/proc'),now_ns=None):
             if counter:point['startTimeUnixNano']=str(boot*10**9)
             result.append(point)
         return result
-    metrics=[{'name':'enmaas_host_cpu_seconds','sum':{'aggregationTemporality':2,'isMonotonic':True,
+    metrics=[{'name':'enmaas_host_sample_unixtime_seconds','gauge':{'dataPoints':[{'asDouble':now_ns/1e9,'timeUnixNano':str(now_ns)}]}},
+             {'name':'enmaas_host_cpu_seconds','sum':{'aggregationTemporality':2,'isMonotonic':True,
               'dataPoints':points(zip(('user','nice','system','idle','iowait','irq','softirq','steal'),[n/ticks for n in cpu]),True)}},
              {'name':'enmaas_host_memory_bytes','gauge':{'dataPoints':points([
                  ('total',total),('available',available),('unavailable',total-available),('cached',cached)])}},
@@ -56,6 +59,9 @@ def sample(proc=Path('/proc'),now_ns=None):
              {'name':'enmaas_host_disk_bytes','gauge':{'dataPoints':points([
                  ('total',disk.f_blocks*disk.f_frsize),('available',disk.f_bavail*disk.f_frsize),
                  ('used',(disk.f_blocks-disk.f_bfree)*disk.f_frsize)])}}]
+    for metric in metrics:
+        for point in metric.get('gauge',metric.get('sum',{}))['dataPoints']:
+            point.setdefault('attributes',[]).append({'key':'host','value':{'stringValue':host_id}})
     return {'resourceMetrics':[{'resource':{'attributes':[{'key':'service.name','value':{'stringValue':'enmaas-gateway-host'}}]},
              'scopeMetrics':[{'scope':{'name':'enmaas-host'},'metrics':metrics}]}]}
 
@@ -78,10 +84,11 @@ def send(address,credentials,payload):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--observability-private-ip',required=True)
+    parser.add_argument('--host-id',default='gateway',help='Unique nonsecret alias for this host')
     args=parser.parse_args()
     endpoint(args.observability_private_ip)
     credentials=Path(os.environ['CREDENTIALS_DIRECTORY'])
-    send(args.observability_private_ip,credentials,sample())
+    send(args.observability_private_ip,credentials,sample(host_id=args.host_id))
     print('Aggregate host measurements delivered')
 
 if __name__=='__main__':

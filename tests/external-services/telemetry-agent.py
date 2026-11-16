@@ -3,6 +3,7 @@
 import argparse
 import importlib.util
 import ipaddress
+import re
 from pathlib import Path
 import yaml
 
@@ -12,7 +13,8 @@ observation=importlib.util.module_from_spec(spec);spec.loader.exec_module(observ
 lab=observation.lab
 
 
-def configuration(address):
+def configuration(address,host_id="gateway"):
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}",host_id):raise ValueError("Invalid host alias")
     address=ipaddress.IPv4Address(address)
     if not any(address in ipaddress.IPv4Network(block) for block in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16')):
         raise ValueError('Use the observability host private IPv4 address')
@@ -21,11 +23,11 @@ def configuration(address):
             'otlp':{'protocols':{'grpc':{'endpoint':'127.0.0.1:4317'}}},
             'prometheus':{'config':{'scrape_configs':[
                 {'job_name':name,'scrape_interval':'15s','scrape_timeout':'5s','sample_limit':10000,
-                 'static_configs':[{'targets':[target]}]}
+                 'static_configs':[{'targets':[target],'labels':{'host':host_id}}]}
                 for name,target in [('praxis','127.0.0.1:9901'),('pricetag-metering','pricetag-metering:9902')]]}}},
         'processors':{
             'memory_limiter':{'check_interval':'1s','limit_mib':192,'spike_limit_mib':32},
-            'transform':observation.privacy_transform(),
+            'transform':observation.privacy_transform(classify=True),
             'batch':{'timeout':'5s','send_batch_size':256,'send_batch_max_size':512}},
         'exporters':{'otlphttp/remote':{
             'endpoint':f'https://{address}:24443',
@@ -52,8 +54,8 @@ def configuration(address):
     return config
 
 
-def configure(root,address):
-    config=configuration(address)
+def configure(root,address,host_id="gateway"):
+    config=configuration(address,host_id)
     if any(root.iterdir()):raise FileExistsError('Use a new empty private output directory')
     root.chmod(0o700)
     lab.write(root,'collector.yaml',yaml.safe_dump(config,sort_keys=False))
@@ -95,7 +97,7 @@ After=network-online.target
 Type=oneshot
 User=praxis-svc
 Group=praxis-svc
-ExecStart=/usr/bin/python3 /usr/local/libexec/enmaas-host-metrics --observability-private-ip {address}
+ExecStart=/usr/bin/python3 /usr/local/libexec/enmaas-host-metrics --observability-private-ip {address} --host-id {host_id}
 LoadCredential=ca.pem:/etc/enmaas-telemetry-lab/server-ca.pem
 LoadCredential=client.pem:/etc/enmaas-telemetry-lab/client.pem
 LoadCredential=client.key:/etc/enmaas-telemetry-lab/client.key
@@ -142,8 +144,9 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--observability-private-ip',required=True)
     parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--host-id',default='gateway',help='Unique nonsecret host alias, e.g. gateway-1')
     args=parser.parse_args();args.output.mkdir(parents=True,exist_ok=True,mode=0o700)
-    configure(args.output,args.observability_private_ip)
+    configure(args.output,args.observability_private_ip,args.host_id)
     print('Gateway relay inputs prepared; installation and runtime qualification remain separate.')
 
 if __name__=='__main__':main()

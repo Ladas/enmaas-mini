@@ -6,7 +6,12 @@ import unittest
 import json
 import tempfile
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
+import contextlib
+import io
+import sys
+import os
+import subprocess
 
 spec=importlib.util.spec_from_file_location('network',Path(__file__).with_name('network.py'))
 network=importlib.util.module_from_spec(spec);spec.loader.exec_module(network)
@@ -61,6 +66,16 @@ class Network(unittest.TestCase):
             self.assertNotEqual(network.ruleset([changed]),expected)
         self.assertNotEqual(network.ruleset([{'IpProtocol':'tcp','FromPort':24443,'ToPort':24443,
                             'Ipv6Ranges':[{'CidrIpv6':'::/0'}]}]),expected)
+        self.assertEqual(network.ruleset([{'IpProtocol':'-1'}]), {('-1',None,None,'unknown','')})
+        self.assertNotEqual(network.ruleset([{'IpProtocol':'tcp','FromPort':24443,'ToPort':24443,
+                            'PrefixListIds':[{'PrefixListId':'pl-test'}]}]),expected)
+
+    def test_wrong_caller_account_fails_before_resource_reads(self):
+        aws=Mock()
+        aws.call.return_value={'Account':'999999999999'}
+        with self.assertRaisesRegex(ValueError,'caller account'):
+            network.inspect(aws,SimpleNamespace(account_id='123456789012'))
+        aws.call.assert_called_once_with('sts','get-caller-identity')
 
     def test_inspection_checks_account_ownership_and_actual_ingress(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -85,6 +100,30 @@ class Network(unittest.TestCase):
                 if action=='describe-security-groups':return {'SecurityGroups':[groups[options['group_ids'][0]]]}
                 self.fail('Unexpected AWS write or read: '+action)
             aws=Mock();aws.call.side_effect=call
+            with patch.object(network.vm,'launch_state',return_value={'Prefix':'another-run'}):
+                with self.assertRaisesRegex(ValueError,'Journal run prefix'):
+                    network.inspect(aws,args)
+            original=groups['sg-gateway']
+            def missing_group(service,action,**options):
+                if action=='describe-security-groups':return {'SecurityGroups':[]}
+                return call(service,action,**options)
+            aws.call.side_effect=missing_group
+            with self.assertRaisesRegex(ValueError,'Security group missing'):
+                network.inspect(aws,args)
+            aws.call.side_effect=call
+            original['IpPermissions']=baseline[:1]
+            with self.assertRaisesRegex(ValueError,'Original restricted ingress is missing'):
+                network.inspect(aws,args)
+            original['IpPermissions']=list(baseline)
+            journal=args.state_dir/'lab-gateway.json'
+            content=journal.read_text()
+            altered=json.loads(content)
+            altered['Ingress']=[{'IpProtocol':'tcp','FromPort':22,'ToPort':22,
+                                 'IpRanges':[{'CidrIp':'0.0.0.0/0'}]}]
+            journal.write_text(json.dumps(altered))
+            with self.assertRaisesRegex(ValueError,'restricted workstation'):
+                network.inspect(aws,args)
+            journal.write_text(content)
             _,missing=network.inspect(aws,args)
             self.assertEqual(len(missing),3)
             for rule in missing:groups[rule['group_id']]['IpPermissions'].append(rule['permission'])
@@ -107,5 +146,102 @@ class Network(unittest.TestCase):
             groups['sg-gateway']['OwnerId']=args.account_id
             hosts['gateway']['State']['Name']='stopped'
             with self.assertRaisesRegex(ValueError,'not running'):network.inspect(aws,args)
+
+class NetworkCLI(unittest.TestCase):
+    def test_cli_wrong_account_reports_failure_without_mutations(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cli=Path(tmp)/'aws'
+            cli.write_text('#!/bin/sh\nprintf \'{"Account":"999999999999"}\\n\'\n')
+            cli.chmod(0o700)
+            result=subprocess.run([sys.executable,str(Path(__file__).with_name('network.py')),
+                '--account-id','123456789012','--region','eu-test-1','--prefix','lab'],
+                env={**os.environ,'PATH':tmp+os.pathsep+os.environ['PATH']},capture_output=True,text=True)
+            self.assertNotEqual(result.returncode,0)
+            self.assertIn('Network setup stopped: AWS caller account differs',result.stderr)
+
+    def setUp(self):
+        self.argv = ['network.py', '--account-id', '123456789012', '--region', 'eu-test-1', '--prefix', 'lab']
+        self.hosts = Network().hosts()
+        self.rules = [{**rule, 'group_id': 'sg-'+rule['target']} for rule in network.peer_rules(self.hosts)]
+        self.confirmation = 'grant peers 123456789012 eu-test-1 lab'
+
+    def invoke(self, snapshots, apply=True, answer=None, error=None):
+        aws = Mock()
+        aws.call.side_effect = error
+        output = io.StringIO()
+        with patch.object(sys, 'argv', self.argv+(['--apply'] if apply else [])), patch.object(
+                network.vm, 'Aws', return_value=aws), patch.object(network, 'inspect', side_effect=snapshots) as inspect, patch(
+                'builtins.input', return_value=self.confirmation if answer is None else answer) as prompt, contextlib.redirect_stdout(output):
+            network.main()
+        return aws, inspect, prompt, output.getvalue()
+
+    def test_plan_and_already_applied_never_prompt_or_write(self):
+        for apply, rules in ((False, self.rules), (True, [])):
+            with self.subTest(apply=apply):
+                aws, inspect, prompt, output = self.invoke([(self.hosts, rules)], apply=apply)
+                aws.call.assert_not_called()
+                prompt.assert_not_called()
+                self.assertEqual(inspect.call_count, 1)
+                self.assertIn('TelemetryAddress', output)
+
+    def test_headless_confirmation_is_exact_and_never_prompts(self):
+        for answer in (self.confirmation,'wrong',''):
+            aws=Mock()
+            with patch.object(sys,'argv',self.argv+['--apply','--confirm',answer]),patch.object(network.vm,'Aws',return_value=aws), \
+                 patch.object(network,'inspect',side_effect=[(self.hosts,self.rules),(self.hosts,self.rules),(self.hosts,[])]), \
+                 patch('builtins.input') as prompt,contextlib.redirect_stdout(io.StringIO()):
+                if answer==self.confirmation:network.main()
+                else:
+                    with self.assertRaisesRegex(ValueError,'Confirmation'):network.main()
+                    aws.call.assert_not_called()
+                prompt.assert_not_called()
+        with patch.object(sys,'argv',self.argv+['--confirm',self.confirmation]),patch.object(network.vm,'Aws') as aws, \
+             contextlib.redirect_stderr(io.StringIO()),self.assertRaises(SystemExit):
+            network.main()
+        aws.assert_not_called()
+
+    def test_apply_rechecks_and_adds_only_reviewed_rules(self):
+        aws, inspect, prompt, output = self.invoke([(self.hosts, self.rules), (self.hosts, self.rules), (self.hosts, [])])
+        self.assertEqual(inspect.call_count, 3)
+        self.assertEqual(aws.call.call_count, 3)
+        for call, rule in zip(aws.call.call_args_list, self.rules):
+            self.assertEqual(call.args, ('ec2', 'authorize-security-group-ingress'))
+            self.assertEqual(call.kwargs, {'group_id': rule['group_id'], 'ip_permissions': [rule['permission']]})
+        self.assertIn('Peer ingress verified', output)
+        prompt.assert_called_once()
+
+    def test_cancel_or_resource_drift_never_authorizes(self):
+        changed_hosts = dict(self.hosts)
+        changed_hosts['gateway'] = dict(changed_hosts['gateway'], PrivateIpAddress='10.0.0.99')
+        cases = [([(self.hosts, self.rules)], 'no', 'Confirmation'),
+                 ([(self.hosts, self.rules), (changed_hosts, self.rules)], None, 'Resources changed'),
+                 ([(self.hosts, self.rules), (self.hosts, self.rules[:-1])], None, 'Resources changed')]
+        for snapshots, answer, message in cases:
+            aws = Mock()
+            with self.subTest(message=message), patch.object(sys, 'argv', self.argv+['--apply']), patch.object(network.vm, 'Aws', return_value=aws), patch.object(network, 'inspect', side_effect=snapshots), patch('builtins.input', return_value=answer or self.confirmation), contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(ValueError, message):
+                    network.main()
+                aws.call.assert_not_called()
+
+    def test_duplicate_is_reverified_but_other_write_errors_stop(self):
+        snapshots = [(self.hosts, self.rules), (self.hosts, self.rules), (self.hosts, [])]
+        aws, inspect, _, output = self.invoke(snapshots, error=network.vm.AwsError('InvalidPermission.Duplicate', 'already present'))
+        self.assertEqual(aws.call.call_count, 3)
+        self.assertEqual(inspect.call_count, 3)
+        self.assertIn('verified', output)
+        with self.assertRaisesRegex(ValueError, 'denied'):
+            self.invoke(snapshots, error=network.vm.AwsError('UnauthorizedOperation', 'denied'))
+        with self.assertRaisesRegex(ValueError, 'Some peer rules are missing'):
+            self.invoke([(self.hosts, self.rules)]*3)
+
+    def test_invalid_account_and_prefix_never_construct_client(self):
+        for option, value in (('--account-id', 'wrong'), ('--prefix', 'bad/name')):
+            argv = self.argv.copy()
+            argv[argv.index(option)+1] = value
+            with self.subTest(option=option), patch.object(sys, 'argv', argv), patch.object(network.vm, 'Aws') as client, contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    network.main()
+                client.assert_not_called()
+
 
 if __name__=='__main__':unittest.main()

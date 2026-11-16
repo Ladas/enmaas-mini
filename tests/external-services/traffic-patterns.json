@@ -10,19 +10,19 @@
     },
     {
       "name": "team",
-      "users": 20,
+      "users": 25,
       "streams_per_user": 1,
       "rate_limit_rps": 1000
     },
     {
       "name": "parallel",
-      "users": 20,
+      "users": 25,
       "streams_per_user": 4,
       "rate_limit_rps": 1000
     },
     {
       "name": "bursts",
-      "users": 20,
+      "users": 25,
       "streams_per_user": 4,
       "rate_limit_rps": 1000,
       "active_seconds": 30,
@@ -30,7 +30,7 @@
     },
     {
       "name": "rate_limited",
-      "users": 20,
+      "users": 25,
       "streams_per_user": 4,
       "rate_limit_rps": 5
     },

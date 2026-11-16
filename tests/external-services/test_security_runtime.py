@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('security_runtime', Path(__file__).with_name('security-runtime.py'))
 runtime = importlib.util.module_from_spec(spec)
@@ -11,6 +12,16 @@ spec.loader.exec_module(runtime)
 
 
 class RuntimeCleanupTests(unittest.TestCase):
+    def test_ci_runtime_includes_disposable_provisioning_probe(self):
+        with patch.object(runtime.subprocess,'run'),patch.object(runtime,'run_check') as checks:
+            runtime.main()
+        self.assertEqual(checks.call_args_list[0].args[0].name,'image-platforms.py')
+        first=checks.call_args_list[1]
+        self.assertEqual(first.args[0].name,'private-issuer-runtime.py')
+        self.assertEqual(first.args[1],['--keycloak','--provisioning'])
+        for name in ('issuer-routes-runtime.py','transfer-runtime.py'):
+            self.assertIn(name,[call.args[0].name for call in checks.call_args_list])
+
     def test_timeout_unwinds_child_cleanup_and_remains_failure(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

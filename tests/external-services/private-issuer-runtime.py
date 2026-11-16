@@ -57,13 +57,42 @@ print('PASS: private hostname connection and certificate validation; wrong hostn
 '''
 
 
-def command(*args,input=None,check=True):
-    result=subprocess.run(['podman',*args],input=input,capture_output=True,text=True,timeout=60)
-    if check and result.returncode:raise RuntimeError('Private issuer runtime operation failed; output suppressed')
-    return result
+def command(*args,input=None,check=True,timeout=60):
+    client='enmaas-issuer-client-'+secrets.token_hex(8) if args[0]=='run' and '--rm' in args else None
+    if client:args=(args[0],'--name',client,*args[1:])
+    try:
+        result=subprocess.run(['podman',*args],input=input,capture_output=True,text=True,timeout=timeout)
+        if check and result.returncode:raise RuntimeError('Private issuer runtime operation failed; output suppressed')
+        return result
+    finally:
+        # Timing out the Podman CLI does not guarantee the container has stopped.
+        # Remove only this invocation's randomly named client, including on errors.
+        if client:
+            removed=subprocess.run(['podman','rm','--force','--ignore',client],
+                capture_output=True,text=True,timeout=30)
+            if removed.returncode:raise RuntimeError('Private issuer client cleanup failed; inspect '+client)
 
 
-def main(keycloak=False):
+
+def report_population_failure(output):
+    try:
+        value=json.loads(output.splitlines()[-1])
+        if (set(value)!={'stage','created','verified','deleted','errno'}
+                or value['stage'] not in ('initial','create','verify','export','delete')
+                or any(type(value[k]) is not int or not 0<=value[k]<=10000 for k in ('created','verified','deleted'))
+                or (value['errno'] is not None and (type(value['errno']) is not int or not 0<=value['errno']<=4095))):
+            raise ValueError()
+    except (ValueError,TypeError,IndexError):
+        raise RuntimeError('Population probe failed; unrecognized diagnostics suppressed') from None
+    raise RuntimeError('Population probe failed: '+json.dumps(value,sort_keys=True))
+
+
+def main(keycloak=False,provisioning=False,population_count=2):
+    if type(population_count) is not int or not 1<=population_count<=10000:
+        raise ValueError('Population count must be 1–10000')
+    if population_count!=2 and not provisioning:
+        raise ValueError('Population size requires the provisioning probe')
+    if provisioning and not keycloak:raise ValueError("Provisioning probe requires --keycloak")
     name='enmaas-issuer-path-'+secrets.token_hex(6)
     label='io.enmaas.test-lab='+name
     created=[];network=False;container=False;proxy=False
@@ -74,7 +103,7 @@ def main(keycloak=False):
             'observability':['192.0.2.12']},1,dns_names={'keycloak':'identity.lab.example.com',
                 'observability':'observability.lab.example.com'})
         if keycloak:
-            lab.configure(root/'realm-inputs',certificates=False)
+            lab.configure(root/'realm-inputs',certificates=False,authorization_test=provisioning)
         material={'server.py':SERVER,'server.pem':(root/'certs/keycloak/server.pem').read_text(),
             'server.key':(root/'certs/keycloak/server.key').read_text(),
             'ca.pem':(root/'certs/trust/issuer-ca.pem').read_text()}
@@ -83,6 +112,9 @@ def main(keycloak=False):
             realm['clients'][0]['redirectUris'].append('https://observability.lab.example.com:19443/oauth2/callback')
             realm['clients'][0]['webOrigins'].append('https://observability.lab.example.com:19443')
             material['realm.json']=json.dumps(realm)
+            if provisioning:
+                for module in ('user-population.py','populate-keycloak.py','keycloak-password.py'):
+                    material[module]=(HERE/module).read_text()
             proxy_config=(root/'realm-inputs/oauth.cfg').read_text().replace(
                 'https://localhost:18443','https://identity.lab.example.com:8443').replace(
                 'https://localhost:19443','https://observability.lab.example.com:19443').replace(
@@ -158,6 +190,25 @@ def main(keycloak=False):
                     prepare.PYTHON,'python3','-B','-',
                     input=(HERE/'private-issuer-client.py').read_text())
                 print(result.stdout.strip())
+                if provisioning:
+                    # The issuer-host credential helper intentionally requires root-owned
+                    # files. Match that inside this disposable, cap-free client only.
+                    provision_options=[{'1001:1001':'0:0','128m':'256m'}.get(value,value) for value in options]
+                    provision_mounts=[value.replace('uid=1001','uid=0') for value in private_mounts]
+                    print('Starting disposable issuer population:',population_count,flush=True)
+                    result=command('run','--rm','--interactive',*provision_options,
+                        '--env','ENMAAS_POPULATION_COUNT='+str(population_count),
+                        '--tmpfs','/tmp:rw,nosuid,nodev,mode=1777,size=128m',
+                        '--secret',name+'-user-population.py,target=user-population.py,mode=0444',
+                        '--secret',name+'-populate-keycloak.py,target=populate-keycloak.py,mode=0444',
+                        '--secret',name+'-keycloak-password.py,target=keycloak-password.py,mode=0444',
+                        '--add-host','identity.lab.example.com:'+private,
+                        '--secret',name+'-ca.pem,target=ca.pem,mode=0444',*provision_mounts,
+                        prepare.PYTHON,'python3','-B','-',
+                        input=(HERE/'private-user-client.py').read_text(),timeout=max(60,min(3600,population_count*2)),check=False)
+                    if result.returncode:
+                        report_population_failure(result.stdout)
+                    print(result.stdout.strip())
                 proxy_mounts=[]
                 for suffix,target in (('oauth.cfg','/lab/oauth.cfg'),('proxy.pem','/lab/server.pem'),
                                       ('proxy.key','/lab/server.key'),('ca.pem','/lab/ca.pem')):
@@ -201,4 +252,7 @@ with opener.open('https://observability.lab.example.com:19443/ping',timeout=3) a
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--keycloak',action='store_true',help='use the pinned real issuer with a disposable development database')
-    main(parser.parse_args().keycloak)
+    parser.add_argument('--provisioning',action='store_true',help='probe user creation/collision/identity in the disposable issuer')
+    parser.add_argument('--population-count',type=int,default=2,help='1–10000 disposable users; default CI smoke test creates two')
+    args=parser.parse_args()
+    main(args.keycloak,args.provisioning,args.population_count)

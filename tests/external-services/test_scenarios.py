@@ -19,6 +19,14 @@ class Scenarios(unittest.TestCase):
         self.assertLessEqual(report['attempts'], 17)
         self.assertEqual(report['statuses'], {'429':report['attempts']})
 
+    def test_denial_reasons_are_reported_per_user(self):
+        result=s.run_phase(lambda user,timeout: {'status':429,'denial_reason':'budget' if user==0 else 'rate_limit'},
+                           users=2,lanes=1,duration=.1,offered_rps=100,timeout=.1)
+        self.assertGreater(result['per_user_budget_denials'][0],0)
+        self.assertEqual(result['per_user_budget_denials'][1],0)
+        self.assertGreater(result['per_user_rate_limit_denials'][1],0)
+        self.assertEqual(result['per_user_rate_limit_denials'][0],0)
+
     def test_burst_windows(self):
         self.assertTrue(s.active_at(0, .1, .2))
         self.assertTrue(s.active_at(.099, .1, .2))
@@ -38,6 +46,10 @@ class Scenarios(unittest.TestCase):
             return {'status':200}
         result = s.run_phase(request, users=3, lanes=2, duration=.12, offered_rps=500, timeout=.1)
         self.assertEqual(set(peaks), {0,1,2})
+        self.assertGreater(result['peak_in_flight'],1)
+        self.assertLessEqual(result['peak_in_flight'],6)
+        self.assertGreater(result['mean_in_flight'],0)
+        self.assertLessEqual(result['mean_in_flight'],result['peak_in_flight']+.1)
         self.assertTrue(all(v <= 2 for v in peaks.values()))
         self.assertGreater(result['attempts'], 0)
         self.assertEqual(sum(result['per_user_successes']), result['attempts'])

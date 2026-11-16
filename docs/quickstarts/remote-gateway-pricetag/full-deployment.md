@@ -7,6 +7,14 @@ metering databases. Real providers are configured in the gateway installer.
 For the layout without SSO/observability, follow the [one-node quickstart](README.md).
 For synthetic workloads, use [full-deployment testing](../../testing/external-services/README.md).
 AWS is optional; its provisioning helpers are separate from installation.
+The gateway uses the same installer and provider-management commands as the
+one-node layout. This layout adds external-service configuration and a gateway
+telemetry agent; it does not require mock providers or synthetic users.
+
+Configure real providers during installation, then use
+[provider management](providers.md) to change endpoints, credentials or models.
+Mock installation and [replacement with real providers](../../testing/external-services/providers.md)
+belong to the testing flow; neither is required for this quickstart.
 
 **Qualification:** source-pinned OIDC and telemetry flows pass local tests.
 Separate-host RHEL, reboot recovery and unrestricted public exposure are not yet
@@ -83,8 +91,19 @@ sudo scripts/pricetag/install --non-interactive --yes \
   --provider openai --openai-key-file /root/enmaas-inputs/openai.key
 ```
 
-For external OpenAI-compatible or Anthropic Messages services, substitute the
-[explicit provider arguments](../../testing/external-services/headless.md#real-providers).
+For an external provider, replace the last line with the appropriate arguments:
+
+| Supported API | Provider arguments |
+| --- | --- |
+| OpenAI-compatible | `--provider external --external-api openai --external-openai-url https://provider.example/v1 --external-key-file /root/enmaas-inputs/external.key` |
+| Anthropic Messages | `--provider external --external-api anthropic --external-messages-url https://provider.example --external-key-file /root/enmaas-inputs/external.key` |
+| Both protocols | `--provider external --external-api both --external-openai-url https://openai.example/v1 --external-messages-url https://messages.example --external-key-file /root/enmaas-inputs/external.key` |
+
+Replace example URLs with the provider's HTTPS endpoints. To configure direct
+OpenAI and an external provider, include both sets of arguments. One external key
+must authorize both endpoints when selecting `both`. Messages defaults to
+`x-api-key`; add `--external-messages-auth bearer` if the provider requires it.
+
 Both installation modes accept the [external database flags](external-database.md).
 These commands create a fresh installation; they do not upgrade existing state.
 

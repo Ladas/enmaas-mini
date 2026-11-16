@@ -13,7 +13,7 @@ spec=importlib.util.spec_from_file_location('local_lab',HERE/'local.py')
 lab=importlib.util.module_from_spec(spec);spec.loader.exec_module(lab)
 spec=importlib.util.spec_from_file_location('issuer_identity',HERE/'issuer-config.py')
 identity=importlib.util.module_from_spec(spec);spec.loader.exec_module(identity)
-PRAXIS='quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8'
+PRAXIS=lab.IMAGES['praxis']
 
 
 def address(value):

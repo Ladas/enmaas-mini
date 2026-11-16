@@ -90,6 +90,21 @@ def completion(path, body, missing_usage=False, declared_tools_only=False):
     return result
 
 
+def synthetic_workload(body):
+    """Explicit private-fixture instruction, never a real provider capability."""
+    messages=body.get('messages',[])
+    content=messages[0].get('content') if messages and isinstance(messages[0],dict) else None
+    prefix='ENMAAS_MOCK_WORKLOAD '
+    if not isinstance(content,str) or not content.startswith(prefix): return None
+    raw=content[len(prefix):].split('\n',1)[0]
+    if len(raw)>512: raise ValueError('Workload instruction too large')
+    value=json.loads(raw)
+    limits={'input_tokens':(128,32768),'output_tokens':(32,4096),'ttft_ms':(0,2000),'chunk_ms':(0,500)}
+    if set(value)!=set(limits) or any(type(value[k]) is not int or not lo<=value[k]<=hi for k,(lo,hi) in limits.items()):
+        raise ValueError('Invalid bounded mock workload')
+    return value
+
+
 def events(path, result):
     """Yield complete SSE frames, including the protocol's terminal event."""
     def frame(data, event=None):
@@ -140,7 +155,7 @@ def events(path, result):
     else:
         initial = {**result, "content": [], "stop_reason": None}
         if "usage" in result:
-            initial["usage"] = {"input_tokens": 2, "output_tokens": 0}
+            initial["usage"] = {"input_tokens": result["usage"]["input_tokens"], "output_tokens": 0}
         yield frame({"type": "message_start", "message": initial}, "message_start")
         block = result["content"][0]
         tool = block["type"] == "tool_use"
@@ -152,7 +167,7 @@ def events(path, result):
         yield frame({"type": "content_block_stop", "index": 0}, "content_block_stop")
         final = {"type": "message_delta", "delta": {"stop_reason": result["stop_reason"], "stop_sequence": None}}
         if "usage" in result:
-            final["usage"] = {"output_tokens": 3}
+            final["usage"] = {"output_tokens": result["usage"]["output_tokens"]}
         yield frame(final, "message_delta")
         yield frame({"type": "message_stop"}, "message_stop")
 
@@ -160,11 +175,12 @@ def events(path, result):
 class Provider:
     def __init__(self, ports=(18080, 18081, 19000), host="127.0.0.1", control_host="127.0.0.1",
                  openai_authorization="Bearer synthetic-openai", model="fixture", local=False, strict_openai=False,
-                 declared_tools_only=False, request_backlog=5, record_limit=None, models_by_api=None):
+                 declared_tools_only=False, request_backlog=5, record_limit=None, models_by_api=None, synthetic_workloads=False):
         # None requires the local profile to remove Authorization completely.
         self.openai_authorization = openai_authorization
         self.model = model
         self.models_by_api = models_by_api
+        self.synthetic_workloads = synthetic_workloads
         self.local = local
         self.strict_openai = strict_openai
         self.declared_tools_only = declared_tools_only
@@ -274,6 +290,20 @@ class Provider:
                         result = completion(self.path, body, mode == "missing_usage", declared_tools_only=True)
                     else:
                         result = completion(self.path, body, mode == "missing_usage")
+                    try:
+                        workload=synthetic_workload(body) if fixture.synthetic_workloads else None
+                    except (ValueError,TypeError):
+                        return self.reply(400, {"error":"invalid synthetic workload"})
+                    if workload:
+                        usage=result.get('usage')
+                        if usage is not None:
+                            incoming,outgoing=workload['input_tokens'],workload['output_tokens']
+                            if self.path == '/v1/chat/completions':
+                                usage.update(prompt_tokens=incoming,completion_tokens=outgoing,total_tokens=incoming+outgoing)
+                            else:
+                                usage.update(input_tokens=incoming,output_tokens=outgoing)
+                                if 'total_tokens' in usage:usage['total_tokens']=incoming+outgoing
+                        time.sleep(workload['ttft_ms']/1000)
                     if not body.get("stream"):
                         return self.reply(200, result)
                     self.send_response(200)
@@ -281,6 +311,7 @@ class Provider:
                     self.send_header("Connection", "close")
                     self.end_headers()
                     for index, event in enumerate(events(self.path, result)):
+                        if index and workload: time.sleep(workload["chunk_ms"]/1000)
                         if index and mode in ("delayed", "cancelled"):
                             time.sleep(delay)
                         if index and mode == "cancelled":

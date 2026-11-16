@@ -40,14 +40,17 @@ runpy.run_path(sys.argv[0], run_name="__main__")
 
 
 def main():
+    run_check(HERE / 'image-platforms.py', [], timeout=600)
     images = json.loads((HERE / 'images.json').read_text())
     for name, image in [('python', prepare.PYTHON), *(
-            (name, images[name]['image']) for name in ('keycloak', 'auth', 'collector'))]:
+            (name, images[name]['image']) for name in ('keycloak', 'auth', 'collector', 'praxis'))]:
         print(f'Acquire pinned {name} image', flush=True)
         subprocess.run(['podman', 'pull', image], check=True, timeout=300)
     for script, arguments in (
-            ('private-issuer-runtime.py', ['--keycloak']),
+            ('private-issuer-runtime.py', ['--keycloak', '--provisioning']),
             ('issuer-lockout.py', []),
+            ('issuer-routes-runtime.py', []),
+            ('transfer-runtime.py', []),
             ('redaction.py', [])):
         print(f'Run {script}', flush=True)
         run_check(HERE / script, arguments)

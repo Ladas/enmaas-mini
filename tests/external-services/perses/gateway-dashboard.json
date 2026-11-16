@@ -10,6 +10,20 @@
     },
     "duration": "15m",
     "panels": {
+      "navigation": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Monitoring navigation"
+          },
+          "plugin": {
+            "kind": "Markdown",
+            "spec": {
+              "text": "[Main monitoring](/projects/praxis/dashboards/enmaas-monitoring) \u00b7 [Gateway traffic](/projects/praxis/dashboards/enmaas-gateway) \u00b7 [Host](/projects/praxis/dashboards/enmaas-host) \u00b7 [Components](/projects/praxis/dashboards/enmaas-components) \u00b7 [Accounting / DB](/projects/praxis/dashboards/enmaas-accounting) \u00b7 [Alerts](/projects/praxis/dashboards/enmaas-alerts) \u00b7 [Inference traces](/projects/praxis/dashboards/enmaas-traces) \u00b7 [Service events](/projects/praxis/dashboards/enmaas-logs)"
+            }
+          }
+        }
+      },
       "0": {
         "kind": "Panel",
         "spec": {
@@ -30,6 +44,12 @@
               "visual": {
                 "areaOpacity": 0,
                 "lineWidth": 2
+              },
+              "yAxis": {
+                "format": {
+                  "unit": "requests/sec",
+                  "decimalPlaces": 2
+                }
               }
             }
           },
@@ -54,7 +74,7 @@
         "spec": {
           "display": {
             "name": "Mean routed request duration",
-            "description": "Seconds per routed request. Mean duration, not a latency percentile. Shows zero when no requests occur in the window."
+            "description": "Mean completed duration by public route, including provider streaming time. Not a latency percentile or proxy overhead. Idle routes have undefined duration, not zero latency."
           },
           "plugin": {
             "kind": "TimeSeriesChart",
@@ -69,6 +89,12 @@
               "visual": {
                 "areaOpacity": 0,
                 "lineWidth": 2
+              },
+              "yAxis": {
+                "format": {
+                  "unit": "seconds",
+                  "decimalPlaces": 2
+                }
               }
             }
           },
@@ -79,7 +105,7 @@
                 "plugin": {
                   "kind": "PrometheusTimeSeriesQuery",
                   "spec": {
-                    "query": "sum by (cluster) (rate(praxis_http_request_duration_seconds_sum{cluster=~\"authenticated-openai|authenticated-anthropic|dashboard\"}[2m])) / clamp_min(sum by (cluster) (rate(praxis_http_request_duration_seconds_count{cluster=~\"authenticated-openai|authenticated-anthropic|dashboard\"}[2m])), 1e-9)",
+                    "query": "sum by (cluster) (rate(praxis_http_request_duration_seconds_sum{cluster=~\"authenticated-openai|authenticated-anthropic|dashboard\"}[2m])) / (sum by (cluster) (rate(praxis_http_request_duration_seconds_count{cluster=~\"authenticated-openai|authenticated-anthropic|dashboard\"}[2m])))",
                     "seriesNameFormat": "{{cluster}}"
                   }
                 }
@@ -108,6 +134,13 @@
               "visual": {
                 "areaOpacity": 0,
                 "lineWidth": 2
+              },
+              "yAxis": {
+                "format": {
+                  "unit": "decimal",
+                  "decimalPlaces": 2,
+                  "shortValues": true
+                }
               }
             }
           },
@@ -147,6 +180,13 @@
               "visual": {
                 "areaOpacity": 0,
                 "lineWidth": 2
+              },
+              "yAxis": {
+                "format": {
+                  "unit": "decimal",
+                  "decimalPlaces": 2,
+                  "shortValues": true
+                }
               }
             }
           },
@@ -175,6 +215,15 @@
             {
               "x": 0,
               "y": 0,
+              "width": 24,
+              "height": 3,
+              "content": {
+                "$ref": "#/spec/panels/navigation"
+              }
+            },
+            {
+              "x": 0,
+              "y": 3,
               "width": 12,
               "height": 10,
               "content": {
@@ -183,7 +232,7 @@
             },
             {
               "x": 12,
-              "y": 0,
+              "y": 3,
               "width": 12,
               "height": 10,
               "content": {
@@ -192,7 +241,7 @@
             },
             {
               "x": 0,
-              "y": 10,
+              "y": 13,
               "width": 12,
               "height": 10,
               "content": {
@@ -201,7 +250,7 @@
             },
             {
               "x": 12,
-              "y": 10,
+              "y": 13,
               "width": 12,
               "height": 10,
               "content": {

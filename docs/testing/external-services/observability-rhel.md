@@ -84,7 +84,7 @@ cardinality controls, store disk limits and long-outage behavior remain separate
 qualification gaps. Existing running collectors need regenerated configuration
 and a controlled restart to receive these settings.
 
-The initial dashboard verifies transport with a synthetic metric. Dedicated gateway traffic, host-resource, trace-detail and sanitized-log dashboards pass local browser tests with actual emitted signals. Imported reference dashboards are not automatically qualified, and benchmark phase markers are not yet integrated into Perses. These local results do not qualify the separate RHEL host installation.
+The initial dashboard verifies transport with a synthetic metric. Dedicated gateway traffic, host-resource, trace-detail and sanitized-log dashboards pass local browser tests with actual emitted signals. The [main monitoring dashboard](monitoring.md) adds local benchmark phase markers, component/accounting charts and alert details. Imported reference dashboards are not automatically qualified; remote phase/component sampling still needs implementation and qualification. These local results do not qualify the separate RHEL host installation.
 
 Before RHEL acceptance, repeat the locally tested persona logins, existing-session group revocation, client-certificate rejection and backend access denials. Also qualify collector restart/drop behavior, retention deletion and disk growth. Loki and Tempo currently have time retention but no tested disk quota.
 
@@ -104,3 +104,5 @@ retrying. Do not disable firewalld or remove the IPv6 policy to bypass the check
 This audit does not cover independently installed nftables rules or replace AWS
 security-group checks and external packet-level deny probes. Its live RHEL
 qualification is still pending.
+
+See [storage and retention](storage.md) for per-service limits and deletion/recovery checks.

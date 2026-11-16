@@ -12,9 +12,11 @@ benchmarks are testing tools; the full deployment itself is not a test-only layo
 | --- | --- | --- |
 | Understand the nodes | [Topology and collector placement](topology.md) | Component ownership and data flow |
 | Run locally | [Local Podman setup](local-podman.md) → [dashboard access](local-dashboards.md) | Full application stack with mocked LLMs; no AWS required |
-| Deploy on AWS/RHEL | [AWS provisioning](aws.md) → [headless installation](headless.md) | Three separate hosts; optional RDS |
+| Deploy on AWS/RHEL | [AWS provisioning](aws.md) → [coordinated installation](service-orchestration.md), or [individual steps](headless.md) | Three separate hosts; optional RDS |
 | Verify security | [Security acceptance](security-acceptance.md) | Tested boundaries, pending checks and evidence requirements |
+| Find URLs and credential commands | [Access summary](service-orchestration.md#open-dashboards-and-retrieve-one-credential) | No credentials printed; selected retrieval commands over verified SSH |
 | Generate and inspect traffic | [Benchmark](benchmark.md) → [report](report.md) | Six phases, accounting reconciliation and resource graphs |
+| Switch to real providers | [Replace mock profiles](providers.md#convert-one-profile-to-a-real-provider) | Keep users, budgets and history; replace selected upstream routes and credentials |
 | Remove resources | [Cleanup](cleanup.md) | Inventory and ordered manual teardown |
 
 ## Configure each component
@@ -22,14 +24,31 @@ benchmarks are testing tools; the full deployment itself is not a test-only layo
 | Component | Guides |
 | --- | --- |
 | Shared trust and connectivity | [Certificates](certificates.md), [peer network rules](network.md) |
-| Identity node | [Keycloak installation](keycloak-rhel.md), [gateway OIDC and identity mapping](oidc.md) |
+| Identity node | [Keycloak installation](keycloak-rhel.md), [gateway OIDC and identity mapping](oidc.md), [synthetic users](keycloak-users.md) |
 | Observability node | [Receiver, stores and Perses](observability-rhel.md) |
 | Gateway node | [Headless application installer](headless.md), [local collector agent and host sampler](gateway-telemetry.md) |
 | Providers and model selection | [Mock profiles and real-provider replacement](providers.md) |
+| Storage lifecycle | [Retention defaults and acceptance](storage.md) |
 | External database | [Optional private RDS](rds.md) |
 | Script entry points and tests | [Categorized script index](../../../tests/external-services/README.md) |
 
 Auxiliary installers live under `tests/external-services`. The normal gateway installer consumes protected external-service configuration; it does not provision AWS or install the auxiliary nodes. All scripts accept explicit inputs; AWS billable operations retain separate administrator confirmation.
+
+## From testing to real providers
+
+1. Finish the mock benchmark, check its cleanup result and save its report.
+2. On the gateway, [replace the selected mock profiles](providers.md#convert-one-profile-to-a-real-provider) with reviewed HTTPS endpoints and real credentials.
+3. Check the offered models and effective prices, refresh the client configuration,
+   and make one small authenticated request. Check its usage in PriceTag.
+
+Provider replacement does not reinstall the gateway, Keycloak, observability or
+databases. It preserves synthetic users and historical mock usage, so a fresh
+deployment is preferable when you need clean production records. Once any real
+provider is configured, the mock benchmark must refuse to run.
+
+For production from the start, use the [one-node quickstart](../../quickstarts/remote-gateway-pricetag/README.md)
+or [full deployment with remote services](../../quickstarts/remote-gateway-pricetag/full-deployment.md).
+Neither requires synthetic accounts or a benchmark run.
 
 ## Provision the three VMs
 
@@ -38,8 +57,11 @@ Otherwise use the separate [AWS three-node infrastructure guide](aws.md). It cov
 account discovery, deployment manifests, launch summaries and recovery journals.
 The [one-node AWS guide](../aws-pricetag.md) is unchanged.
 
-The current AWS helper requires an approved subnet. Dedicated-VPC provisioning,
-complete scoped-role bootstrap and automated deletion are still pending.
+The existing three-VM helper requires an approved subnet. The new
+[combined network/host command](infrastructure.md) creates a dedicated VPC and
+three restricted hosts, but is not yet the complete deployment flow. Full scoped-role
+permissions and automated deletion remain pending. The service coordinator is
+implemented; its separate-host RHEL acceptance remains pending.
 
 ## Interactive or headless installation
 

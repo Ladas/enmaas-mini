@@ -44,17 +44,37 @@ publicly trusted. Existing bundles are never overwritten.
 
 ## Transfer one role bundle
 
-Use the matching verified SSH host and SSH key. Check the host fingerprint before the first connection. This example transfers the gateway bundle; repeat with `keycloak` and `observability` and their corresponding host variables.
+Run on the workstation. Set `KNOWN_HOSTS` to a private host-key file whose
+fingerprints you verified through a trusted channel. Both it and `SSH_KEY` must
+be absolute paths to user-owned regular files with mode `0600`. Unlock the SSH
+key in your agent if needed. `ssh-keyscan` alone does not authenticate a host.
 
 ```sh
-ROLE=gateway
-TARGET="$GATEWAY_RHEL_HOST"
-tar -C "$LAB_TLS/$ROLE" -cf - . | \
-  ssh -i "$SSH_KEY" -o IdentitiesOnly=yes "$TARGET" \
-  "sudo sh -c 'umask 077; mkdir /root/enmaas-tls && tar -xf - -C /root/enmaas-tls'"
+python3 tests/external-services/transfer-client.py \
+  --role keycloak --bundle "$LAB_TLS/keycloak" \
+  --destination "$KEYCLOAK_RHEL_HOST" \
+  --ssh-key "$SSH_KEY" --known-hosts "$KNOWN_HOSTS" &&
+python3 tests/external-services/transfer-client.py \
+  --role observability --bundle "$LAB_TLS/observability" \
+  --destination "$OBSERVABILITY_RHEL_HOST" \
+  --ssh-key "$SSH_KEY" --known-hosts "$KNOWN_HOSTS" &&
+python3 tests/external-services/transfer-client.py \
+  --role gateway --bundle "$LAB_TLS/gateway" \
+  --destination "$GATEWAY_RHEL_HOST" \
+  --ssh-key "$SSH_KEY" --known-hosts "$KNOWN_HOSTS"
 ```
 
-The remote directory must not already exist. Never transfer the parent `lab-tls` directory or `authorities/`. Leaf private keys are deployment credentials; do not include them in test evidence or Git.
+Each destination is `user@IPv4` with noninteractive `sudo` access. The helper sends
+only the selected role's allowlisted leaf keys and public certificates to
+`/root/enmaas-tls`, using mode `0700` for the directory and `0600` for files.
+It never sends CA signing keys, even if extra files exist in the source directory.
+It disables SSH forwarding and requires an already trusted host key.
+
+An existing destination is never overwritten. A failed transfer may leave a
+partial directory: inspect it before recovery rather than rerunning blindly.
+Certificate/key agreement, SANs and lifetime are checked by the consuming
+installers; successful transport alone does not qualify a certificate or service.
+Cross-host RHEL transfer remains an acceptance check.
 
 ## Use the bundles
 
@@ -67,3 +87,19 @@ The [Keycloak](keycloak-rhel.md) and [observability](observability-rhel.md) comm
 The gateway verifies certificate/key agreement, trust, server purpose, remaining lifetime and the public/loopback names before installation changes. Only its leaf certificate/key and public CA are copied into gateway state. The default installer still generates its existing private lab CA when this option is omitted.
 
 Trust `trust/issuer-ca.pem` in test browsers and clients. Do not disable TLS verification. Trusting this CA authorizes certificates signed by its private key; protect the workstation signing keys and remove test trust after cleanup.
+
+## Telemetry credential scope
+
+The generated gateway bundle contains one telemetry client key/certificate. The
+agent and restricted host sampler both use it. The observability receiver trusts
+the dedicated telemetry CA; the issuer's HTTPS certificates do not grant ingestion
+access. No telemetry CA signing key is transferred to a host.
+
+This authenticates a trusted producer, not a PriceTag user or a particular metric
+label. The receiver does not enforce certificate-subject-to-label ownership.
+Sharing the client key with another service grants the same ingestion authority;
+do not distribute it to harness users. Rotation must update both gateway senders.
+Individual-certificate revocation is not configured by these helpers; retaining
+the old trusted CA also retains trust in an unexpired old client certificate.
+Plan CA/trust replacement if the gateway client key is compromised, then verify
+old-key rejection and both senders' recovery. Leaf renewal is not revocation.

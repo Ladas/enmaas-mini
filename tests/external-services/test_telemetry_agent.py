@@ -10,6 +10,17 @@ spec=importlib.util.spec_from_file_location('agent',Path(__file__).with_name('te
 agent=importlib.util.module_from_spec(spec);spec.loader.exec_module(agent)
 
 class Agent(unittest.TestCase):
+    def test_unique_host_alias_propagates_to_scrapes_and_host_sampler(self):
+        for alias in ('gateway-1','gateway-2'):
+            with tempfile.TemporaryDirectory() as d:
+                root=Path(d);agent.configure(root,'10.0.0.20',alias)
+                config=yaml.safe_load((root/'collector.yaml').read_text())
+                for job in config['receivers']['prometheus']['config']['scrape_configs']:
+                    self.assertEqual(job['static_configs'][0]['labels'],{'host':alias})
+                self.assertIn('--host-id '+alias,(root/'systemd/enmaas-host-metrics.service').read_text())
+        for alias in ('', 'private.example', 'a'*41, 'a\nExecStart=bad'):
+            with self.assertRaises(ValueError):agent.configuration('10.0.0.20',alias)
+
     def test_private_receivers_and_verified_client_identity(self):
         config=agent.configuration('10.0.0.20')
         self.assertEqual(config['receivers']['otlp']['protocols']['grpc']['endpoint'],'127.0.0.1:4317')

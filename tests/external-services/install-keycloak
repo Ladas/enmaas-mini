@@ -16,6 +16,12 @@ for path in [root,root/'quadlets',*root.iterdir(),*(root/'quadlets').iterdir(),*
     info=path.lstat()
     if path.is_symlink() or info.st_uid!=0 or info.st_mode&0o077 or not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
         raise SystemExit('inputs must be root-owned private regular files/directories, without symlinks')
+# Conservative bound compatible with supported Podman secret implementations.
+# In particular, do not place bulk-user imports in one realm secret.
+for path in [*(root/name for name in ('db-password','keycloak.conf','realm.json','proxy.json')),*map(Path,sys.argv[2:4])]:
+    secret=path.stat()
+    if not stat.S_ISREG(secret.st_mode) or not 0<secret.st_size<=500000:
+        raise SystemExit('each Podman secret must contain 1–500000 bytes; provision bulk users separately after issuer startup')
 for cidr in sys.argv[5:]:
     network=ipaddress.IPv4Network(cidr,strict=True)
     if network.prefixlen<24:raise SystemExit('use explicit /24–/32 source networks for this test host')

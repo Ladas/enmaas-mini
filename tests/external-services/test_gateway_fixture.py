@@ -38,6 +38,17 @@ class GatewayFixture(unittest.TestCase):
             with self.assertRaises(ValueError):fixture.role_action('unreviewed-role')
             run.assert_not_called()
 
+    def test_identity_mutations_refuse_untrusted_or_public_fixture_before_secret_reads(self):
+        for action in (lambda:fixture.role_action('super_admin'),
+                       lambda:fixture.role_action('user'),
+                       lambda:fixture.partner_action('provision'),
+                       lambda:fixture.partner_action('deactivate')):
+            with self.subTest(action=action), \
+                 patch.object(fixture.lab,'check_port_bindings',side_effect=RuntimeError('unsafe pod')), \
+                 patch.object(Path,'read_text') as read,patch.object(fixture,'run') as run:
+                with self.assertRaisesRegex(RuntimeError,'unsafe pod'):action()
+                read.assert_not_called();run.assert_not_called()
+
     def test_mock_dependencies_have_no_published_ports_or_host_mounts(self):
         calls=[]
         with patch.object(fixture,'run',side_effect=lambda *args,**kwargs:calls.append(args) or b''):

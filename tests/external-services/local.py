@@ -26,22 +26,26 @@ LABEL = 'io.enmaas.test-lab=' + INSTANCE
 PORTS = (18443, 19443, 24443)
 IMAGES = {name: entry['image'] for name, entry in json.loads((HERE/'images.json').read_text()).items()}
 PERSES_ASSETS = ('project.json', 'datasource.json', 'dashboard.json', 'gateway-dashboard.json',
-                 'host-dashboard.json', 'tempo-datasource.json', 'traces-dashboard.json', 'trace-detail-dashboard.json', 'loki-datasource.json', 'logs-dashboard.json')
+                 'components-dashboard.json', 'monitoring-dashboard.json', 'benchmark-dashboard.json', 'accounting-dashboard.json', 'alerts-dashboard.json', 'host-dashboard.json', 'tempo-datasource.json', 'traces-dashboard.json', 'trace-detail-dashboard.json', 'loki-datasource.json', 'logs-dashboard.json')
 
 
-def privacy_transform():
+def privacy_transform(*, classify=False):
     resource=['keep_keys(attributes, ["service.name", "service.version", "deployment.environment.name"])']
     scope=['set(name, "enmaas")','set(version, "")','keep_keys(attributes, [])']
     attributes='keep_keys(attributes, ["http.request.method", "http.response.status_code", "error.type", "gen_ai.provider.name", "gen_ai.request.model"])'
+    inference='attributes["http.request.method"] == "POST" and (attributes["url.path"] == "/v1/chat/completions" or attributes["url.path"] == "/v1/responses" or attributes["url.path"] == "/v1/messages")'
+    trace_attributes=attributes.replace('"http.request.method",', '"enmaas.request.kind", "http.request.method",')
+    reset='set(attributes["enmaas.request.kind"], "gateway")'
+    if not classify: reset += ' where attributes["enmaas.request.kind"] != "inference"'
     transform={'error_mode':'propagate',
         'log_statements':[{'context':'resource','statements':resource},{'context':'scope','statements':scope},
             {'context':'log','statements':[attributes,'set(body, "gateway event")','set(severity_text, "")']}],
         'trace_statements':[{'context':'resource','statements':resource},{'context':'scope','statements':scope},
-            {'context':'span','statements':[attributes,'set(name, "request")','set(status.message, "")','set(trace_state, "")','set(links, nil)']},
+            {'context':'span','statements':[reset,'set(attributes["enmaas.request.kind"], "inference") where '+inference,trace_attributes,'set(name, "request")','set(name, "inference") where attributes["enmaas.request.kind"] == "inference"','set(status.message, "")','set(trace_state, "")','set(links, nil)']},
             {'context':'spanevent','statements':['set(name, "event")','keep_keys(attributes, [])']}],
         'metric_statements':[{'context':'resource','statements':resource},{'context':'scope','statements':scope},
             {'context':'metric','statements':['set(description, "")','set(unit, "")']},
-            {'context':'datapoint','statements':['keep_keys(attributes, ["http.request.method", "http.response.status_code", "gen_ai.request.model", "state", "cpu", "device", "direction", "type", "cluster", "route", "listener", "endpoint", "method", "status_class", "filter", "phase", "quantile", "le", "result", "reason"])','set(exemplars, nil) where metric.type != METRIC_DATA_TYPE_SUMMARY']}]}
+            {'context':'datapoint','statements':['keep_keys(attributes, ["http.request.method", "http.response.status_code", "gen_ai.request.model", "state", "component", "host", "replica", "cpu", "device", "direction", "type", "cluster", "route", "listener", "endpoint", "method", "status_class", "filter", "phase", "quantile", "le", "result", "reason"])','set(exemplars, nil) where metric.type != METRIC_DATA_TYPE_SUMMARY']}]}
     return transform
 
 
@@ -185,6 +189,9 @@ datasource:
     http:
       max_conns_per_host: 16
       max_timeout: 10s
+frontend:
+  explorer:
+    enable: true
 provisioning:
   folders: [/etc/perses/lab]
 ''')
@@ -203,9 +210,13 @@ provisioning:
         'spec': {'display': {'name': 'Local transport test'}, 'duration': '15m',
             'panels': {'0': panel}, 'layouts': [{'kind': 'Grid', 'spec': {'items': [
                 {'x': 0, 'y': 0, 'width': 24, 'height': 10, 'content': {'$ref': '#/spec/panels/0'}}]}}]}})
-    for name in ('gateway-dashboard.json','host-dashboard.json','tempo-datasource.json','traces-dashboard.json','trace-detail-dashboard.json', 'loki-datasource.json', 'logs-dashboard.json'):
+    for name in ('components-dashboard.json','monitoring-dashboard.json', 'benchmark-dashboard.json','accounting-dashboard.json','alerts-dashboard.json','gateway-dashboard.json','host-dashboard.json','tempo-datasource.json','traces-dashboard.json','trace-detail-dashboard.json', 'loki-datasource.json', 'logs-dashboard.json'):
         write(root, name, json.loads((HERE/'perses'/name).read_text()))
-    write(root, 'prometheus.yaml', '''global:
+    write(root, 'monitoring-rules.yaml', (HERE/'perses/monitoring-rules.yaml').read_text())
+    write(root, 'prometheus.yaml', '''rule_files:
+  - /lab/monitoring-rules.yaml
+global:
+  evaluation_interval: 15s
   scrape_interval: 5s
 scrape_configs:
   - job_name: prometheus
@@ -289,6 +300,7 @@ processors:
 exporters:
   prometheus:
     endpoint: 127.0.0.1:8889
+    send_timestamps: true
   otlphttp/loki:
     endpoint: http://127.0.0.1:3100/otlp
   otlphttp/tempo:
@@ -339,6 +351,15 @@ def secret_name(name):
     return f'{POD}-{name.replace(".", "-")}'
 
 
+def check_database_shm():
+    # Podman can inherit the pod's /dev/shm even when --shm-size is supplied.
+    # Verify the mounted filesystem rather than trusting launch arguments.
+    result=subprocess.check_output(['podman','exec',f'{POD}-db','df','-B1','/dev/shm'],text=True)
+    try:size=int(result.splitlines()[1].split()[1])
+    except (IndexError,ValueError):raise RuntimeError('Cannot verify PostgreSQL shared-memory mount') from None
+    if size!=512*1024*1024:raise RuntimeError('PostgreSQL requires its private 512 MiB shared-memory mount')
+
+
 def start(gateway=False, authorization_test=False):
     if not (STATE/'credentials.json').exists():
         configure(STATE, authorization_test=authorization_test)
@@ -359,7 +380,7 @@ def start(gateway=False, authorization_test=False):
     # Secrets are mounted only into their consuming containers. The CA private
     # key and browser test passwords never enter the pod (realm import excepted).
     files = ['ca.pem', 'server.pem', 'server.key', 'realm.json', 'db-password',
-             'keycloak.conf', 'oauth.cfg', 'perses.yaml', 'prometheus.yaml',
+             'keycloak.conf', 'oauth.cfg', 'perses.yaml', 'prometheus.yaml', 'monitoring-rules.yaml',
              'loki.yaml', 'tempo.yaml', 'collector.yaml', *PERSES_ASSETS]
     for name in files:
         with (STATE/name).open('rb') as stream:
@@ -375,7 +396,8 @@ def start(gateway=False, authorization_test=False):
         command([*cmd, *extra, images[component], *args], stdout=subprocess.DEVNULL)
 
     run('db', [('db-password', '/run/secrets/db-password')],
-        extra=['--user', '999:999', '-e', 'POSTGRES_USER=keycloak', '-e', 'POSTGRES_DB=keycloak',
+        memory='2g',
+        extra=['--ipc', 'private', '--tmpfs', '/dev/shm:rw,nosuid,nodev,noexec,size=512m,mode=1777', '--user', '999:999', '-e', 'POSTGRES_USER=keycloak', '-e', 'POSTGRES_DB=keycloak',
                '-e', 'POSTGRES_PASSWORD_FILE=/run/secrets/db-password',
                '-v', f'{POD}-db:/var/lib/postgresql/data:U'])
     for _ in range(60):
@@ -385,6 +407,7 @@ def start(gateway=False, authorization_test=False):
         time.sleep(1)
     else:
         raise RuntimeError('Keycloak database did not become ready')
+    check_database_shm()
     tls = [(name, f'/lab/{name}') for name in ('ca.pem', 'server.pem', 'server.key')]
     run('keycloak', tls+[('keycloak.conf', '/lab/keycloak.conf'),
                         ('realm.json', '/opt/keycloak/data/import/realm.json')],
@@ -394,14 +417,14 @@ def start(gateway=False, authorization_test=False):
         for name in PERSES_ASSETS], ['--config=/lab/perses.yaml'],
         extra=['-v', f'{POD}-perses:/perses:U'])
     run('auth', tls+[('oauth.cfg', '/lab/oauth.cfg')], ['--config=/lab/oauth.cfg'], memory='128m')
-    run('prometheus', [('prometheus.yaml', '/lab/prometheus.yaml')],
+    run('prometheus', [('prometheus.yaml', '/lab/prometheus.yaml'),('monitoring-rules.yaml','/lab/monitoring-rules.yaml')],
         ['--config.file=/lab/prometheus.yaml', '--storage.tsdb.path=/prometheus',
          '--storage.tsdb.retention.time=48h', '--storage.tsdb.retention.size=512MB'],
         extra=['-v', f'{POD}-prometheus:/prometheus:U'])
     run('loki', [('loki.yaml', '/lab/loki.yaml')], ['-config.file=/lab/loki.yaml'],
         extra=['-v', f'{POD}-loki:/loki:U'])
     run('tempo', [('tempo.yaml', '/lab/tempo.yaml')], ['-config.file=/lab/tempo.yaml'],
-        extra=['-v', f'{POD}-tempo:/var/tempo:U'])
+        extra=['-v', f'{POD}-tempo:/var/tempo:U','--env','GOMEMLIMIT=768MiB'], memory='1g')
     run('collector', tls+[('collector.yaml', '/lab/collector.yaml')], ['--config=/lab/collector.yaml'], memory='256m')
     check()
 
@@ -441,7 +464,23 @@ def require_tls_rejection(request, tls_context):
     raise RuntimeError('Collector accepted TLS without a client certificate')
 
 
+def check_port_bindings():
+    """Inspect actual pod exposure before declaring the local fixture healthy."""
+    info = json.loads(subprocess.check_output(['podman', 'pod', 'inspect', POD], timeout=15))[0]
+    if info.get('Labels', {}).get('io.enmaas.test-lab') != INSTANCE:
+        raise RuntimeError('Local pod ownership does not match the selected fixture')
+    bindings = info.get('InfraConfig', {}).get('PortBindings')
+    required = {str(port)+'/tcp' for port in (18443, 19443, 24443)}
+    if not isinstance(bindings, dict) or set(bindings) not in (required, required | {'28443/tcp'}):
+        raise RuntimeError('Unexpected local pod port mappings')
+    for endpoint, entries in bindings.items():
+        expected = [{'HostIp':'127.0.0.1', 'HostPort':endpoint.split('/')[0]}]
+        if entries != expected:
+            raise RuntimeError('Local pod ports must use exact loopback-only bindings')
+
+
 def check():
+    check_port_bindings()
     for component, endpoint in (('perses', '8080/api/v1/health'),
                                 ('prometheus', '9090/-/ready'),
                                 ('loki', '3100/ready'), ('tempo', '3200/ready')):
@@ -468,7 +507,7 @@ def check():
     require_tls_rejection(request, context())
     with urllib.request.urlopen(request, context=context(client=True), timeout=5) as response:
         assert response.status == 200
-    print('PASS: verified issuer TLS; anonymous UI denial; collector requires client certificate.')
+    print('PASS: loopback-only pod ports; verified issuer TLS; anonymous UI denial; collector requires client certificate.')
     print('Browser: https://localhost:19443 — private CA:', STATE/'ca.pem')
     print('Test credentials (not printed):', STATE/'credentials.json')
     print('This is transport coverage; run browser and signal tests separately.')

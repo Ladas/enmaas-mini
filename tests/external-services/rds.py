@@ -10,6 +10,9 @@ from pathlib import Path
 import re
 
 
+spec=importlib.util.spec_from_file_location('external_aws_environment',Path(__file__).resolve().parents[2]/'scripts/aws/environment.py')
+aws_environment=importlib.util.module_from_spec(spec);spec.loader.exec_module(aws_environment)
+
 def build_plan(*,account,region,prefix,vpc,subnets,gateway_group,engine_version,instance_class):
     if not re.fullmatch(r'[0-9]{12}',account):raise ValueError('Explicit AWS account required')
     if not re.fullmatch(r'[a-z]{2}(?:-[a-z]+)+-[0-9]',region):raise ValueError('Invalid region')
@@ -72,9 +75,15 @@ class ReadOnlyAws:
         for old,new in [('DbInstanceClass','DBInstanceClass'),('DbInstanceIdentifier','DBInstanceIdentifier'),('DbParameterGroupName','DBParameterGroupName')]:
             if old in payload and new!=old:payload[new]=payload.pop(old)
         args.extend([service,action,'--cli-input-json',json.dumps(payload)])
-        result=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=60)
+        result=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=60,env=aws_environment.environment(self.profile))
         if result.returncode:raise ValueError('AWS read failed: '+service+' '+action)
-        return json.loads(result.stdout)
+        response=json.loads(result.stdout)
+        # AWS CLI normally consumes pages. Never accept a remaining service/CLI
+        # continuation token as a complete ownership or capability inventory.
+        if (not isinstance(response,dict) or any(response.get(key) for key in
+                ('NextToken','nextToken','Marker'))):
+            raise ValueError('AWS response is incomplete or invalid: '+service+' '+action)
+        return response
 
 
 def live_plan(aws,args):
@@ -183,6 +192,11 @@ def verify(aws,state,account,region):
             or db['DBSubnetGroup']['VpcId']!=plan['VpcId']
             or db['DBSubnetGroup']['DBSubnetGroupName']!=expected['DBSubnetGroupName']):
         raise ValueError('RDS network differs')
+    subnets=db['DBSubnetGroup'].get('Subnets',[])
+    actual_subnets=[subnet.get('SubnetIdentifier') for subnet in subnets]
+    if (len(actual_subnets)!=len(plan['SubnetGroup']['SubnetIds'])
+            or set(actual_subnets)!=set(plan['SubnetGroup']['SubnetIds'])):
+        raise ValueError('RDS subnet membership differs from the approved plan')
     groups=aws.call('ec2','describe-security-groups',group_ids=[group])['SecurityGroups']
     if len(groups)!=1 or groups[0]['OwnerId']!=account or groups[0]['VpcId']!=plan['VpcId']:
         raise ValueError('RDS security-group ownership differs')
@@ -215,9 +229,13 @@ def verify(aws,state,account,region):
         actual={tag['Key']:tag['Value'] for tag in aws.call('rds','list-tags-for-resource',resource_name=arn)['TagList']}
         if any(actual.get(key)!=value for key,value in expected_tags.items()):
             raise ValueError('RDS dependency ownership tags differ')
+    endpoint=db.get('Endpoint',{}).get('Address')
     ready=(db['DBInstanceStatus']=='available' and parameters[0]['ParameterApplyStatus']=='in-sync'
-           and db['MasterUserSecret'].get('SecretStatus')=='active')
-    return {'Ready':ready,'State':db['DBInstanceStatus'],'Endpoint':db.get('Endpoint',{}).get('Address'),
+           and db['DBSubnetGroup'].get('SubnetGroupStatus')=='Complete'
+           and all(subnet.get('SubnetStatus')=='Active' for subnet in subnets)
+           and db['MasterUserSecret'].get('SecretStatus')=='active'
+           and isinstance(endpoint,str) and bool(endpoint.strip()))
+    return {'Ready':ready,'State':db['DBInstanceStatus'],'Endpoint':endpoint,
             'TLSMode':'verify-full','ApplicationRolesAndConnectivity':'not qualified'}
 
 

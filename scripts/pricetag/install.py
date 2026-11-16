@@ -548,7 +548,8 @@ def main():
         install(args)
 
 
-if __name__ == '__main__':
+def cli():
+    """Report failures consistently and close the private log on every exit."""
     try:
         main()
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError, EOFError, KeyboardInterrupt) as error:
@@ -562,3 +563,7 @@ if __name__ == '__main__':
     finally:
         if LOG is not None:
             LOG.close()
+
+
+if __name__ == '__main__':
+    cli()

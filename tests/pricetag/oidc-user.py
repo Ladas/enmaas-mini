@@ -58,6 +58,35 @@ class Identity(unittest.TestCase):
             with patch.object(module.os,'fstat',side_effect=root_owned):
                 with self.assertRaisesRegex(ValueError,'64 KiB'):module.private_json(path)
 
+    def test_deactivation_requires_confirmed_inactive_identity_and_key_count(self):
+        identity='9fc73c22-ff5a-4037-b8b1-78b2d96b2f38'
+        payload={'user_id':identity,'tags':{'email':'test@example.test','first_name':'Test','last_name':'User'}}
+        for result in ({'user_id':identity,'active':False,'keys_revoked':2},
+                       {'user_id':identity,'active':True,'keys_revoked':2},
+                       {'user_id':identity,'active':False,'keys_revoked':True},
+                       {'user_id':identity,'active':False,'keys_revoked':-1}):
+            with patch.object(module,'partner_request',return_value=result) as request:
+                if result['active'] is False and type(result['keys_revoked']) is int and result['keys_revoked']>=0:
+                    self.assertEqual(module.deactivate(payload),result)
+                else:
+                    with self.assertRaises(ValueError):module.deactivate(payload)
+                request.assert_called_once_with(payload,'DELETE')
+
+    def test_key_readback_is_bound_to_profile_uuid_and_rejects_invalid_shapes(self):
+        profile={'user_id':'9fc73c22-ff5a-4037-b8b1-78b2d96b2f38','tags':{'email':'test@example.test','first_name':'Test','last_name':'User'}}
+        with tempfile.TemporaryDirectory() as tmp,patch.object(module.os,'geteuid',return_value=0):
+            root=Path(tmp);(root/'partner-secret').write_text('synthetic-secret')
+            for payload in ({'keys':[]},{'keys':None},[]):
+                with patch.object(module,'DEPLOY',root),patch.object(module.urllib.request,'build_opener') as build:
+                    response=MagicMock();response.read.return_value=json.dumps(payload).encode()
+                    build.return_value.open.return_value.__enter__.return_value=response
+                    if payload=={'keys':[]}:self.assertEqual(module.list_keys(profile),[])
+                    else:
+                        with self.assertRaises(ValueError):module.list_keys(profile)
+                    request=build.return_value.open.call_args.args[0]
+                    self.assertEqual(request.full_url,'http://127.0.0.1:18087/api/v1/users/'+profile['user_id']+'/keys')
+                    self.assertEqual(request.method,'GET');self.assertIsNone(request.data)
+
     def test_nonroot_does_not_read_secret_or_call_api(self):
         with patch.object(module.os,'geteuid',return_value=1000), patch.object(module.urllib.request,'build_opener') as build:
             with self.assertRaises(ValueError):module.provision({})

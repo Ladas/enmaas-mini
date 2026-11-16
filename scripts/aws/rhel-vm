@@ -9,6 +9,7 @@ import argparse
 from contextlib import contextmanager, nullcontext
 import fcntl
 import ipaddress
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,10 @@ import subprocess
 import sys
 import tempfile
 import uuid
+
+_spec = importlib.util.spec_from_file_location('aws_cli_environment', Path(__file__).with_name('environment.py'))
+_environment = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_environment)
 
 OWNER = "309956199498"
 MANAGED = "secure-single-server-test"
@@ -57,7 +62,14 @@ class Aws:
                 command += [json.dumps(value)]
             else:
                 command += [str(value)]
-        result = subprocess.run(command, capture_output=True, text=True)
+        try:
+            result = subprocess.run(command, capture_output=True, text=True,
+                                    env=_environment.environment(self.profile), timeout=120)
+        except subprocess.TimeoutExpired:
+            # A killed CLI is not proof that AWS rejected or stopped a write.
+            # Never include its command, stdout or stderr in public diagnostics.
+            raise AwsError("Timeout", f"AWS {action} timed out; outcome may be uncertain. "
+                           "Inspect the recovery journal and live resources before retrying.") from None
         if result.returncode:
             # AWS errors may echo request material. Never dump credential chain,
             # debug output or full request arguments into evidence.
@@ -376,7 +388,9 @@ def vllm_grant(aws, args):
     except AwsError as error:
         if error.code != "InvalidPermission.Duplicate":
             raise
-        validate_vllm_grant_state(aws, vllm_state, client_state["SecurityGroupId"])
+        _, existing = validate_vllm_grant_state(aws, vllm_state, client_state["SecurityGroupId"])
+        if not existing:
+            raise ValueError("duplicate grant reported but the exact rule is not visible; rerun verification before retrying") from None
     record_vllm_grant(vllm_state, args, client_state["SecurityGroupId"])
     print("Granted private TCP 8000 access from the single server security group.")
 
@@ -567,10 +581,14 @@ def apply_plan(aws, args, proposal):
     state.update(SecurityGroupId=group, ApplyStatus="security-group-created")
     update_state(args.state_file, state)
     aws.call("ec2", "authorize-security-group-ingress", group_id=group, ip_permissions=proposal["Ingress"])
-    aws.call("ec2", "import-key-pair", key_name=args.prefix,
+    state.update(ApplyStatus="key-import-requested")
+    update_state(args.state_file, state)
+    key = aws.call("ec2", "import-key-pair", key_name=args.prefix,
              public_key_material="fileb://" + str(args.public_key.resolve()),
              tag_specifications=[{"ResourceType": "key-pair", "Tags": owned}])
-    state.update(KeyPairName=args.prefix, ApplyStatus="launch-requested")
+    if key.get("KeyName") != args.prefix or not re.fullmatch(r"key-[a-f0-9]{8,17}", key.get("KeyPairId", "")):
+        raise ValueError("AWS key import outcome uncertain; preserve the journal and reconcile before retrying")
+    state.update(KeyPairName=args.prefix, KeyPairId=key["KeyPairId"], ApplyStatus="launch-requested")
     update_state(args.state_file, state)
     launch_instance(aws, args, proposal, state)
 
@@ -715,6 +733,8 @@ def retry_plan(aws, args, state):
     check_ingress(group, state)
     key = aws.call("ec2", "describe-key-pairs", key_names=[state["KeyPairName"]], include_public_key=True)["KeyPairs"][0]
     check_owned(key, state)
+    if "KeyPairId" in state and key.get("KeyPairId") != state["KeyPairId"]:
+        raise ValueError("retry key-pair ID differs from the imported resource")
     if key["PublicKey"].split()[:2] != args.public_key.read_text().split()[:2]:
         raise ValueError("retry public key differs from the imported key; restore the original SSH_KEY")
     return {**state, "SubnetId": args.subnet_id, "AvailabilityZone": subnet["AvailabilityZone"],

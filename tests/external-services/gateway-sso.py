@@ -19,9 +19,9 @@ import prepare
 import oidc_config
 
 
-def run(*args,input=None):
+def run(*args,input=None,timeout=None):
     return subprocess.run(['podman',*map(str,args)],input=input,check=True,
-                          stdout=subprocess.PIPE,stderr=subprocess.PIPE).stdout
+                          stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=timeout).stdout
 
 
 def secret(name,path):
@@ -203,6 +203,7 @@ def inference_probe():
 
 def role_action(role):
     if role not in ('user','super_admin'):raise ValueError('Unsupported test role')
+    lab.check_port_bindings()
     values=dict(line.split('=',1) for line in (lab.STATE/'gateway-sso.env').read_text().splitlines())
     lab.write(lab.STATE,'gateway-management',values['MANAGEMENT_API_SECRET'])
     names=[];mounts=[]
@@ -221,6 +222,7 @@ def role_action(role):
 
 
 def partner_action(action='provision'):
+    lab.check_port_bindings()
     output=run('run','--rm','--pod',lab.POD,'--read-only','--cap-drop','ALL',
         '--security-opt','no-new-privileges','--memory','128m','--pids-limit','64',
         '--secret',lab.secret_name('gateway-sso-partner')+',target=/fixture/partner,mode=0444',
@@ -250,5 +252,5 @@ if __name__=='__main__':
         elif args.action=='inference':inference_probe()
         elif args.action=='deactivate':partner_action('deactivate')
         else:test()
-    except (ValueError,subprocess.SubprocessError,OSError):
+    except (ValueError,RuntimeError,subprocess.SubprocessError,OSError):
         raise SystemExit('Gateway SSO fixture failed; inspect private fixture state. No automatic deletion.') from None

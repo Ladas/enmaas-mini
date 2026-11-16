@@ -58,6 +58,30 @@ are rejected as unexpected ingress; an administrator must review and remove thos
 exact obsolete grants before switching. The helper never widens or deletes rules
 automatically. This path is unit-tested, but not yet qualified against live AWS.
 
+## Headless application of a reviewed plan
+
+After reviewing the private-issuer plan, supply the exact confirmation explicitly.
+Run on the operator workstation with the scoped profile; no AWS credentials go
+to the service hosts:
+
+```sh
+python3 tests/external-services/network.py \
+  --account-id "$ACCOUNT_ID" --region "$REGION" --prefix "$RUN_PREFIX" \
+  --profile "$AWS_PROFILE" --state-dir "$INFRA_JOURNAL" \
+  --issuer-path private --apply \
+  --confirm "grant peers $ACCOUNT_ID $REGION $RUN_PREFIX"
+```
+
+For the combined infrastructure command, `INFRA_JOURNAL` is its `--journal`
+directory and `RUN_PREFIX` is the registered deployment ID, not the group prefix.
+All three instances must already be running. The command rechecks ownership,
+addresses and rules immediately before writes and verifies the resulting rules.
+Resource drift or an inexact confirmation stops it. An already-applied plan makes
+no writes. This is not a replacement for DNS/client configuration or packet tests.
+
+Use `--issuer-path public` only for the explicitly restricted public-IP test path
+described above; it does not meet private-only identity backchannel requirements.
+
 ## Host firewall
 
 Security groups and host firewalls must agree:

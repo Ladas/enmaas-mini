@@ -19,7 +19,7 @@ if os.environ.get('MOCK_PROFILES') == '1':
                   for api in ('openai', 'anthropic')}
         server = Provider(ports=ports, host='0.0.0.0', local=False,
             openai_authorization='Bearer ' + key, models_by_api=models,
-            declared_tools_only=True, request_backlog=512, record_limit=1000)
+            declared_tools_only=True, request_backlog=512, record_limit=1000, synthetic_workloads=True)
         if 'MOCK_STREAM_DELAY' in os.environ:
             server.mode = 'delayed'
             server.delay = float(os.environ['MOCK_STREAM_DELAY'])
@@ -29,7 +29,7 @@ if os.environ.get('MOCK_PROFILES') == '1':
 
 managed = os.environ.get('MOCK_MANAGEMENT') == '1'
 fixture = (Provider(host='0.0.0.0', local=False, openai_authorization='Bearer synthetic-anthropic',
-                    declared_tools_only=True, request_backlog=512, record_limit=1000)
+                    declared_tools_only=True, request_backlog=512, record_limit=1000, synthetic_workloads=True)
            if managed else Provider(host='0.0.0.0', local=True, request_backlog=512))
 if 'MOCK_STREAM_DELAY' in os.environ:
     fixture.mode = 'delayed'

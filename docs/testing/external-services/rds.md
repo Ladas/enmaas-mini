@@ -57,6 +57,13 @@ Verification checks network isolation, storage encryption/bounds, backups, delet
 
 ## Ownership verification
 
+Verification also requires the RDS-reported subnet IDs to match the approved plan
+exactly, without duplicates. Readiness requires a complete subnet group and active
+member subnets. A changed membership is rejected; incomplete status is reported as
+not ready. This checks RDS metadata, not live packet isolation: AWS notes that
+[reported subnet details can lag the VPC configuration](https://docs.aws.amazon.com/AmazonRDS/latest/APIReference/API_DBSubnetGroup.html).
+Verify private routing and gateway-only connectivity separately on AWS.
+
 Verification compares the database, subnet-group and parameter-group ARNs with
 the creation journal, checks their ownership tags and the security-group tags,
 and requires the managed master-secret ARN to match its recorded reference.

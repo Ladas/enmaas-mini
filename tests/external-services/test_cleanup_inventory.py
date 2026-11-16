@@ -1,4 +1,10 @@
 import copy
+import contextlib
+import io
+import json
+import subprocess
+import sys
+import tempfile
 import importlib.util
 from pathlib import Path
 import unittest
@@ -9,6 +15,19 @@ cleanup = importlib.util.module_from_spec(spec); spec.loader.exec_module(cleanup
 
 
 class Inventory(unittest.TestCase):
+    def test_inventory_refuses_recreated_key_pair_with_original_name(self):
+        manifest,journals,resources=self.fixture()
+        state=journals['gateway'];state['KeyPairId']='key-1234567890abcdef0'
+        key=resources['keys'][state['KeyPairName']]
+        for identifier in (None,'key-abcdef12345678900','key-1234567890abcdef0'):
+            key['KeyPairId']=identifier
+            with self.subTest(identifier=identifier):
+                if identifier==state['KeyPairId']:
+                    cleanup.inventory(manifest,journals,resources)
+                else:
+                    with self.assertRaisesRegex(ValueError,'key-pair identity'):
+                        cleanup.inventory(manifest,journals,resources)
+
     def test_group_references_report_owned_and_unowned_rules_without_adoption(self):
         def group(identifier,field):
             return {'GroupId':identifier,'OwnerId':'123456789012',field:[{
@@ -48,6 +67,18 @@ class Inventory(unittest.TestCase):
         self.assertEqual(plan['stages'][1]['root_volumes_deleted_with_instances'],['vol-0','vol-1','vol-2'])
         self.assertEqual(plan['stages'][-1]['stage'],'local-state')
         self.assertEqual(plan['stages'][-1]['automatic_deletion'],False)
+
+    def test_teardown_keeps_dedicated_vpc_as_unverified_final_dependency(self):
+        recorded={'state':'uncertain-operation','confirmed_resources':[{'action':'create-vpc','id':'vpc-12345678'}],
+                  'pending_operation':{'action':'create-subnet'},'live_verified':False,'deletion_authorized':False}
+        plan=cleanup.teardown_plan([],[],None,network=recorded)
+        step=next(row for row in plan['stages'] if row['stage']=='dedicated-vpc')
+        self.assertEqual(step['creation_records'],recorded)
+        self.assertFalse(step['deletion_authorized'])
+        self.assertIn('live VPC',step['required'])
+        self.assertLess(plan['stages'].index(step),len(plan['stages'])-1)
+        absent=cleanup.teardown_plan([],[],None)
+        self.assertIsNone(next(row for row in absent['stages'] if row['stage']=='dedicated-vpc')['creation_records'])
 
     def test_rds_plan_requires_retention_choice_and_keeps_managed_secret_service_owned(self):
         manifest,journals,resources=self.fixture()
@@ -104,6 +135,29 @@ class Inventory(unittest.TestCase):
             resources['keys'][prefix] = {'Tags': tags}
             resources['volumes'][volume] = {'Tags': tags, 'Attachments': [{'InstanceId': instance}]}
         return manifest, journals, resources
+
+    def test_live_resource_collection_rejects_partial_and_duplicate_results(self):
+        manifest,_,resources=self.fixture()
+        responses=[{'Reservations':[{'OwnerId':manifest['account'],'Instances':[
+            {'InstanceId':key,**value} for key,value in resources['instances'].items()]}]}]
+        for kind,field,key in (('groups','SecurityGroups','GroupId'),('keys','KeyPairs','KeyName'),
+                               ('volumes','Volumes','VolumeId')):
+            responses.append({field:[{key:identifier,**row} for identifier,row in resources[kind].items()]})
+        aws=Mock();aws.call.side_effect=copy.deepcopy(responses)
+        result=cleanup.collect_resources(aws,manifest)
+        self.assertEqual(set(result),set(resources))
+        for index,field in enumerate(('Reservations','SecurityGroups','KeyPairs','Volumes')):
+            for change in ('partial','duplicate','empty-id'):
+                altered=copy.deepcopy(responses)
+                if change=='partial':altered[index]['NextToken']='more'
+                else:
+                    rows=altered[index][field]
+                    if index==0:rows=rows[0]['Instances']
+                    if change=='duplicate':rows.append(copy.deepcopy(rows[0]))
+                    else:rows[0][('InstanceId','GroupId','KeyName','VolumeId')[index]]=''
+                aws=Mock();aws.call.side_effect=altered
+                with self.subTest(index=index,change=change),self.assertRaises(ValueError):
+                    cleanup.collect_resources(aws,manifest)
 
     def test_exact_inventory(self):
         result = cleanup.inventory(*self.fixture())
@@ -186,5 +240,111 @@ class Inventory(unittest.TestCase):
         verify.assert_not_called()
         with patch.object(cleanup.rds, 'verify', side_effect=ValueError('tags differ')):
             with self.assertRaises(ValueError):cleanup.rds_inventory(manifest, journal, Mock())
+
+    def test_cli_inventory_reads_exact_scope_and_never_enables_deletion(self):
+        for include_plan in (False, True):
+            manifest,journals,resources=self.fixture()
+            for kind,key in (('instances','InstanceId'),('groups','GroupId'),('keys','KeyName'),('volumes','VolumeId')):
+                for identifier,row in resources[kind].items():row[key]=identifier
+            aws=Mock()
+            results={'describe-security-groups':{'SecurityGroups':list(resources['groups'].values())},
+                     'describe-key-pairs':{'KeyPairs':list(resources['keys'].values())},
+                     'describe-volumes':{'Volumes':list(resources['volumes'].values())},
+                     'describe-instances':{'Reservations':[{'OwnerId':manifest['account'],'Instances':list(resources['instances'].values())}]}}
+            def call(service,action,**options):
+                self.assertEqual(service,'ec2')
+                self.assertEqual(options['filters'],[{'Name':'tag:enmaas:run','Values':[manifest['id']]}])
+                return results[action]
+            aws.call.side_effect=call
+            def journal(path):
+                return journals[next(role for role in journals if str(path).endswith('-'+role+'.json'))]
+            output=io.StringIO()
+            argv=['cleanup-inventory.py','manifest.json']+(['--teardown-plan','--network-journal','network'] if include_plan else [])
+            with self.subTest(plan=include_plan),patch.object(cleanup.network_journal,'inspect',return_value={'live_verified':False}) as network,patch('sys.argv',argv),patch.object(cleanup.registry,'load',return_value=manifest),patch.object(cleanup.registry,'read_private_json',side_effect=journal),patch.object(cleanup.vm,'Aws',return_value=aws) as client,patch.object(cleanup.vm,'check_identity') as identity,patch.object(cleanup,'network_dependencies',return_value=[]),patch.object(cleanup,'group_references',return_value=[]),contextlib.redirect_stdout(output):
+                cleanup.main()
+                client.assert_called_once_with(manifest['region'],manifest['aws_profile'],False)
+                identity.assert_called_once_with(aws,manifest['account'])
+                report=json.loads(output.getvalue())
+                self.assertFalse(report['deletion_enabled'])
+                self.assertEqual(len(report['ec2_inventory']),12)
+                self.assertEqual('teardown_plan' in report,include_plan)
+                if include_plan:
+                    self.assertFalse(report['teardown_plan']['execution_enabled'])
+                    network.assert_called_once_with(Path('network'),manifest)
+                    self.assertEqual(report['network_creation_records'],{'live_verified':False})
+                else:
+                    network.assert_not_called()
+                    self.assertIsNone(report['network_creation_records'])
+                results['describe-instances']['Reservations'][0]['OwnerId']='999999999999'
+                aws.call.reset_mock()
+                with self.assertRaisesRegex(ValueError,'reservation account'):
+                    cleanup.main()
+                self.assertEqual(aws.call.call_count,1)
+
+    def test_invalid_network_journal_stops_before_aws_inventory(self):
+        manifest,_,_=self.fixture()
+        with patch('sys.argv',['cleanup-inventory.py','manifest.json','--network-journal','network']), \
+             patch.object(cleanup.registry,'load',return_value=manifest), \
+             patch.object(cleanup.network_journal,'inspect',side_effect=ValueError('foreign journal')), \
+             patch.object(cleanup.vm,'Aws') as client,self.assertRaises(ValueError):
+            cleanup.main()
+        client.assert_not_called()
+
+    def test_cli_absent_manifest_fails_without_cloud_access(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result=subprocess.run([sys.executable,str(Path(__file__).with_name('cleanup-inventory.py')),
+                str(Path(tmp)/'missing')],capture_output=True,text=True)
+            self.assertNotEqual(result.returncode,0)
+            self.assertIn('Inventory stopped; no resources changed:',result.stderr)
+
+    def test_inventory_rejects_shared_resources_wrong_account_and_extra_disks(self):
+        for case in ('shared','account','disks'):
+            manifest,journals,resources=self.fixture()
+            if case=='shared':journals['keycloak']['SecurityGroupId']=journals['gateway']['SecurityGroupId']
+            if case=='account':resources['groups']['sg-0']['OwnerId']='999999999999'
+            if case=='disks':resources['instances']['i-0']['BlockDeviceMappings'].append({'DeviceName':'/dev/sdb'})
+            # The duplicate-ID guard is independent of tag validation (covered
+            # separately); emulate a resource already accepted by that validator.
+            with self.subTest(case=case),patch.object(cleanup.vm,'owned_tags',return_value=True):
+                with self.assertRaisesRegex(ValueError,{'shared':'shared across roles','account':'account differs','disks':'unexpected disks'}[case]):
+                    cleanup.inventory(manifest,journals,resources)
+
+    def test_dependency_queries_require_explicit_scope(self):
+        aws=Mock()
+        with self.assertRaisesRegex(ValueError,'explicit deployment'):
+            cleanup.network_dependencies(aws,'123456789012',set(),set())
+        with self.assertRaisesRegex(ValueError,'explicit deployment'):
+            cleanup.group_references(aws,'123456789012',set())
+        manifest,_,_=self.fixture()
+        with self.assertRaisesRegex(ValueError,'immutable database ID'):
+            cleanup.retained_storage(manifest,'wrong',aws)
+        aws.call.assert_not_called()
+
+    def test_cli_rds_group_is_separate_and_remains_in_dependency_scope(self):
+        manifest,journals,resources=self.fixture()
+        for kind,key in (('instances','InstanceId'),('groups','GroupId'),('keys','KeyName'),('volumes','VolumeId')):
+            for identifier,row in resources[kind].items():row[key]=identifier
+        rds_journal={'Resources':{'SecurityGroup':'sg-rds'}}
+        database={'resources':[],'retained_storage':[]}
+        for mode in ('valid','missing','shared'):
+            groups=list(resources['groups'].values())
+            if mode=='valid':groups.append({'GroupId':'sg-rds'})
+            rds_journal['Resources']['SecurityGroup']='sg-0' if mode=='shared' else 'sg-rds'
+            results={'describe-instances':{'Reservations':[{'OwnerId':manifest['account'],'Instances':list(resources['instances'].values())}]},
+                     'describe-security-groups':{'SecurityGroups':groups},
+                     'describe-key-pairs':{'KeyPairs':list(resources['keys'].values())},
+                     'describe-volumes':{'Volumes':list(resources['volumes'].values())}}
+            aws=Mock();aws.call.side_effect=lambda service,action,**kwargs:results[action]
+            def journal(path):
+                if str(path)=='rds.json':return rds_journal
+                return journals[next(role for role in journals if str(path).endswith('-'+role+'.json'))]
+            with self.subTest(mode=mode),patch('sys.argv',['cleanup-inventory.py','manifest.json','--rds-journal','rds.json']),patch.object(cleanup.registry,'load',return_value=manifest),patch.object(cleanup.registry,'read_private_json',side_effect=journal),patch.object(cleanup.vm,'Aws',return_value=aws),patch.object(cleanup.vm,'check_identity'),patch.object(cleanup.rds,'ReadOnlyAws'),patch.object(cleanup,'rds_inventory',return_value=database),patch.object(cleanup,'network_dependencies',return_value=[]) as dependencies,patch.object(cleanup,'group_references',return_value=[]),contextlib.redirect_stdout(io.StringIO()):
+                if mode=='valid':
+                    cleanup.main()
+                    self.assertIn('sg-rds',dependencies.call_args.args[2])
+                else:
+                    with self.assertRaisesRegex(ValueError,'missing or unexpectedly shared'):
+                        cleanup.main()
+                    dependencies.assert_not_called()
 
 if __name__ == '__main__':unittest.main()
