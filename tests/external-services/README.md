@@ -86,7 +86,7 @@ See [local setup](../../docs/testing/external-services/local-podman.md) and [das
 ## Qualification tests and shared support
 
 - **Isolated runtime suite:** `python3 tests/external-services/security-runtime.py` pulls pinned public images and checks private-issuer/OAuth2 Proxy authorization, issuer lockout/recovery and collector privacy/request sizes. CI runs the same command without AWS/provider credentials or the named demo fixture.
-- **Unit contracts:** `test_*.py`, run with `python3 -m unittest discover -s tests/external-services -p 'test_*.py'`.
+- **Unit contracts:** `unit/test_*.py`, run with `python3 -m unittest discover -s tests/external-services -p 'test_*.py'`.
 - **Identity/browser boundaries:** `browser.cjs`, `oidc-client.cjs`, `gateway-sso.cjs`, `gateway-lifecycle.cjs`, `group-revocation.cjs`, `keycloak-boundary.py`; `private-issuer-runtime.py` checks hostname TLS on an isolated internal network, and `--keycloak` adds login/PKCE/userinfo checks through `private-issuer-client.py`; `issuer-lockout.py` uses a separate disposable issuer for failed-login/temporary-lockout/recovery checks.
 - **Secret-file runtime:** `transfer-runtime.py` runs the unchanged remote read/write scripts as root and a non-root user in disposable, networkless containers. It verifies private ownership, no overwrite, symlink refusal and root-only access; no host files or real secrets are mounted.
 - **Issuer route probe:** `issuer-routes-runtime.py` starts a disposable pinned Keycloak and generated Praxis proxy with no published ports. It checks discovery before/after admin, master-realm and encoded-path probes, and verifies that forged Host/forwarded headers cannot change discovery issuer/endpoint URLs. `--praxis-image` supports an explicit native local override; that result does not qualify the default deployment image.
@@ -97,7 +97,20 @@ See [local setup](../../docs/testing/external-services/local-podman.md) and [das
 - **Image platform preflight:** `image-platforms.py` inspects every auxiliary digest and requires native Linux amd64/arm64 index entries before the security suite starts. It performs registry reads only and rejects platform-specific image locks.
 - **Pinned assets:** `images.json`, `*-vm.json` and `perses/`. Imported dashboard references have separate provenance; only explicitly tested dashboards are qualified.
 
-The files remain in this directory to preserve imports and documented commands. This index separates operational entry points from test internals without introducing duplicate launchers.
+## Source layout
+
+- `unit/`: isolated unit contracts, discovered recursively by the command above.
+- `perses/`: maintained dashboard templates and datasource definitions.
+- `monitoring.py`: generated dashboard and alert-rule definitions; the local and RHEL configuration generators render these into their protected output directories.
+- Top-level commands: infrastructure, service setup, benchmark and runtime probes; existing CLI paths remain stable.
+
+To inspect generated dashboard JSON and alert rules without starting services:
+
+```sh
+python3 tests/external-services/monitoring.py --output .state/monitoring-preview
+```
+
+Edit `monitoring.py` for generated dashboards, or the maintained templates under `perses/`. Generated output belongs in `.state/`, not in source control.
 
 The runtime suite allows 90 seconds for fixture cleanup after a test timeout or
 interruption. A timeout still fails the suite. Forced termination, runner loss or

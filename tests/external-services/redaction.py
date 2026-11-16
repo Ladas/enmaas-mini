@@ -86,7 +86,8 @@ def main(host_sample=None):
             mounts=[]
             for file in ('collector.yaml','ca.pem','server.pem','server.key'):
                 secret=name+'-'+file.replace('.','-')
-                with (root/file).open('rb') as source:run('secret','create','--label','io.enmaas.test-lab=redaction',secret,'-',stdin=source)
+                # Native Podman 4 requires a pipe for '-', not a regular-file stdin.
+                run('secret','create','--label','io.enmaas.test-lab=redaction',secret,'-',input=(root/file).read_bytes())
                 created.append(secret);mounts+=['--secret',f'{secret},target=/lab/{file}']
             run('run','-d','--name',name,'--label','io.enmaas.test-lab=redaction',
                 '--memory','256m','--pids-limit','128','--cap-drop','all','--security-opt','no-new-privileges',

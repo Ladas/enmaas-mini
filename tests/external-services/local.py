@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Disposable loopback-only SSO/telemetry fixture; no AWS or host trust changes."""
 import argparse
+import importlib.util
 import base64
 import json
 import os
@@ -16,6 +17,8 @@ import urllib.error
 import urllib.request
 
 HERE = Path(__file__).resolve().parent
+_monitor_spec=importlib.util.spec_from_file_location('lab_monitoring',HERE/'monitoring.py')
+monitoring=importlib.util.module_from_spec(_monitor_spec);_monitor_spec.loader.exec_module(monitoring)
 ROOT = HERE.parents[1]
 INSTANCE = os.environ.get('ENMAAS_LAB_INSTANCE', 'external-local')
 if not re.fullmatch(r'[a-z][a-z0-9-]{2,31}', INSTANCE):
@@ -210,9 +213,11 @@ provisioning:
         'spec': {'display': {'name': 'Local transport test'}, 'duration': '15m',
             'panels': {'0': panel}, 'layouts': [{'kind': 'Grid', 'spec': {'items': [
                 {'x': 0, 'y': 0, 'width': 24, 'height': 10, 'content': {'$ref': '#/spec/panels/0'}}]}}]}})
-    for name in ('components-dashboard.json','monitoring-dashboard.json', 'benchmark-dashboard.json','accounting-dashboard.json','alerts-dashboard.json','gateway-dashboard.json','host-dashboard.json','tempo-datasource.json','traces-dashboard.json','trace-detail-dashboard.json', 'loki-datasource.json', 'logs-dashboard.json'):
-        write(root, name, json.loads((HERE/'perses'/name).read_text()))
-    write(root, 'monitoring-rules.yaml', (HERE/'perses/monitoring-rules.yaml').read_text())
+    for name,document in monitoring.all_dashboards().items():
+        write(root,name,document)
+    for name in ('tempo-datasource.json','loki-datasource.json'):
+        write(root,name,json.loads((HERE/'perses'/name).read_text()))
+    write(root,'monitoring-rules.yaml',yaml.safe_dump(monitoring.rules(),sort_keys=False))
     write(root, 'prometheus.yaml', '''rule_files:
   - /lab/monitoring-rules.yaml
 global:
@@ -383,9 +388,9 @@ def start(gateway=False, authorization_test=False):
              'keycloak.conf', 'oauth.cfg', 'perses.yaml', 'prometheus.yaml', 'monitoring-rules.yaml',
              'loki.yaml', 'tempo.yaml', 'collector.yaml', *PERSES_ASSETS]
     for name in files:
-        with (STATE/name).open('rb') as stream:
-            command(['podman', 'secret', 'create', '--label', LABEL, secret_name(name), '-'],
-                    stdin=stream, stdout=subprocess.DEVNULL)
+        # input= creates a pipe, as required by native Podman 4 for '-'.
+        command(['podman', 'secret', 'create', '--label', LABEL, secret_name(name), '-'],
+                input=(STATE/name).read_bytes(), stdout=subprocess.DEVNULL)
 
     def run(component, mounts, args=(), extra=(), memory='512m'):
         cmd = ['podman', 'run', '--detach', '--pod', POD, '--name', f'{POD}-{component}',

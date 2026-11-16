@@ -28,7 +28,7 @@ jobs:
       - name: Install test tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y podman python3-venv
+          sudo apt-get install -y podman python3-venv zsh
           python3 -m venv .venv-observability
           .venv-observability/bin/pip install -r tests/aws/requirements.txt -r tests/external-services/stress-requirements.txt
       - name: Test contracts and isolated alert timing
@@ -50,7 +50,7 @@ jobs:
       - name: Install tools and browser
         run: |
           sudo apt-get update
-          sudo apt-get install -y podman python3-venv
+          sudo apt-get install -y podman python3-venv zsh
           python3 -m venv .venv-observability
           .venv-observability/bin/pip install -r tests/aws/requirements.txt -r tests/external-services/stress-requirements.txt
           npm ci --prefix tests/pricetag/browser

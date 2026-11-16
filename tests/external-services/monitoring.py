@@ -496,9 +496,22 @@ def dashboards():
     return {'benchmark-dashboard.json':benchmark,'host-dashboard.json':resource_selectors(host),'components-dashboard.json':resource_selectors(components,True),'monitoring-dashboard.json':main,'accounting-dashboard.json':accounting,'alerts-dashboard.json':alerts}
 
 
+def all_dashboards():
+    """Combine maintained templates with generated dashboards without workspace writes."""
+    documents={path.name:json.loads(path.read_text()) for path in (HERE/'perses').glob('*-dashboard.json')}
+    documents.update(dashboards())
+    return documents
+
+
 def write(root):
-    root=Path(root)
-    for name,document in dashboards().items():(root/name).write_text(json.dumps(document,indent=2)+'\n')
+    root.mkdir(parents=True,exist_ok=True)
+    for name,document in all_dashboards().items():
+        (root/name).write_text(json.dumps(document,indent=2)+'\n')
     (root/'monitoring-rules.yaml').write_text(yaml.safe_dump(rules(),sort_keys=False))
 
-if __name__=='__main__':write(HERE/'perses')
+
+if __name__=='__main__':
+    import argparse
+    parser=argparse.ArgumentParser(description='Export dashboard and alert definitions for inspection')
+    parser.add_argument('--output',type=Path,required=True,help='Output directory, for example .state/monitoring-preview')
+    write(parser.parse_args().output)

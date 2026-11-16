@@ -52,8 +52,7 @@ def canonical(value):
 
 def check_dashboards(query):
     """A healthy proxy is insufficient: provisioned dashboard JSON must be readable."""
-    for path in (HERE/'perses').glob('*-dashboard.json'):
-        expected=json.loads(path.read_text())
+    for expected in lab.monitoring.all_dashboards().values():
         name=expected['metadata']['name']
         reply=query('http://127.0.0.1:8080/api/v1/projects/praxis/dashboards/'+name)
         if not isinstance(reply,dict) or reply.get('metadata',{}).get('name')!=name or not reply.get('spec',{}).get('panels'):
@@ -78,8 +77,8 @@ def refresh():
     collector['processors'].pop('transform/privacy',None)
     collector['exporters']['prometheus']['send_timestamps']=True
     updates={
-      'prometheus':{'/lab/prometheus.yaml':yaml.safe_dump(prom),'/lab/monitoring-rules.yaml':(HERE/'perses/monitoring-rules.yaml').read_text()},
-      'perses':{'/etc/perses/lab/'+p.name:p.read_text() for p in (HERE/'perses').glob('*-dashboard.json')},
+      'prometheus':{'/lab/prometheus.yaml':yaml.safe_dump(prom),'/lab/monitoring-rules.yaml':yaml.safe_dump(lab.monitoring.rules(),sort_keys=False)},
+      'perses':{'/etc/perses/lab/'+name:json.dumps(document,indent=2)+'\n' for name,document in lab.monitoring.all_dashboards().items()},
       'collector':{'/lab/collector.yaml':yaml.safe_dump(collector)},
     }
     token=uuid.uuid4().hex[:8]

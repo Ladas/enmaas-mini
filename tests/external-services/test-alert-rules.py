@@ -148,7 +148,7 @@ def main():
     names=[]
     try:
         mounts=[]
-        for suffix,content in [('rules',(HERE/'perses/monitoring-rules.yaml').read_text()),('tests',yaml.safe_dump(suite()))]:
+        for suffix,content in [('rules',yaml.safe_dump(monitor.rules(),sort_keys=False)),('tests',yaml.safe_dump(suite()))]:
             name=prefix+'-'+suffix
             subprocess.run(['podman','secret','create',name,'-'],input=content.encode(),check=True,stdout=subprocess.DEVNULL)
             names.append(name);mounts+=['--secret',name+',target=/'+suffix+'.yaml,mode=0444']
