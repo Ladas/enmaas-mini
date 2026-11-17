@@ -1,7 +1,7 @@
 """Bounded scenario annotations, not synthetic application performance metrics."""
 import time
 
-NAMES=('budget_mix','stress_200','stress_250','baseline','team','parallel','bursts','sustained_high','rate_limited','recovery','stress_10','stress_50','stress_150','stress_100','stress_1000','stress_10000','stress_recovery')
+NAMES=('budget_mix','stress_200','stress_250','stress_500','stress_750','baseline','team','parallel','bursts','sustained_high','rate_limited','recovery','stress_10','stress_50','stress_150','stress_100','stress_1000','stress_10000','stress_recovery')
 
 
 def payload(phase,now=None):

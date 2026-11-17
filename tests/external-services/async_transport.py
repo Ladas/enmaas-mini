@@ -21,7 +21,7 @@ def response_duration(sequence,minimum,maximum):
 class AsyncTransport:
     def __init__(self, url, ca, keys, model, *, profiles, user_agents,
                  concurrency, minimum_seconds=10, maximum_seconds=120):
-        if (type(concurrency) is not int or not 1 <= concurrency <= 20000 or
+        if (type(concurrency) is not int or not 1 <= concurrency <= 40000 or
                 any(type(v) is not int for v in (minimum_seconds,maximum_seconds)) or
                 not 10 <= minimum_seconds <= maximum_seconds <= 120):
             raise ValueError('Invalid stress transport bounds')

@@ -57,6 +57,40 @@
             }
           ]
         }
+      },
+      "errors": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Failed inference traces",
+            "description": "Sampled inference spans marked as errors. This is not a count of HTTP 5xx responses: inspect each trace status and timing. The table may be empty even when gateway errors occurred, because traces are sampled."
+          },
+          "plugin": {
+            "kind": "TraceTable",
+            "spec": {
+              "links": {
+                "trace": "/projects/praxis/dashboards/enmaas-trace-detail?var-traceId=${traceId}"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TraceQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "TempoTraceQuery",
+                  "spec": {
+                    "datasource": {
+                      "kind": "TempoDatasource",
+                      "name": "tempo"
+                    },
+                    "query": "{resource.service.name =~ \"enmaas-gateway.*\" && span.enmaas.request.kind = \"inference\" && status = error}"
+                  }
+                }
+              }
+            }
+          ]
+        }
       }
     },
     "layouts": [
@@ -80,6 +114,15 @@
               "height": 16,
               "content": {
                 "$ref": "#/spec/panels/0"
+              }
+            },
+            {
+              "x": 0,
+              "y": 19,
+              "width": 24,
+              "height": 16,
+              "content": {
+                "$ref": "#/spec/panels/errors"
               }
             }
           ]

@@ -32,6 +32,10 @@ class AsyncProvider(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status, 503)
             self.assertEqual(capacity.rejected, 1)
             self.assertEqual(capacity.active, 1)
+            response=await client.get('/__enmaas/capacity')
+            self.assertEqual(response.status,401)
+            response=await client.get('/__enmaas/capacity',headers=headers)
+            self.assertEqual(await response.json(),{'maximum':1,'active':1,'peak':0,'rejected':1})
 
     async def test_real_slow_stream_has_final_usage_and_releases_capacity(self):
         from transport import MockTransport
@@ -54,6 +58,13 @@ class AsyncProvider(unittest.IsolatedAsyncioTestCase):
                 validator.stream = True
                 validator.validate(data, api, (128,32))
                 self.assertEqual(capacity.active, 0)
+                self.assertEqual(capacity.peak,1)
+
+    def test_explicit_large_capacity_remains_bounded(self):
+        self.assertEqual(async_provider.Capacity().maximum,40000)
+        self.assertEqual(async_provider.Capacity(40000).active,0)
+        for maximum in (0,40001,True):
+            with self.assertRaises(ValueError):async_provider.Capacity(maximum)
 
     def test_duration_and_payload_bounds(self):
         self.assertEqual(async_provider.instruction(self.body,self.common)[1],10)

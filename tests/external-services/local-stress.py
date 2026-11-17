@@ -15,7 +15,7 @@ import time
 from async_scenarios import run_phase
 from async_transport import AsyncTransport
 from private_api_bridge import PrivateApiBridge
-from stress_plan import plan, escalation_stop
+from stress_plan import plan, escalation_stop, select_phases
 from stress_signals import payload as stress_payload
 from workload_profiles import client_for_api
 import importlib.util
@@ -211,16 +211,17 @@ def main():
     parser.add_argument('--provider-image',required=True)
     parser.add_argument('--duration',type=int,default=600)
     parser.add_argument('--database-profile',action='store_true',help='Collect anonymized statement costs per phase; requires preloaded pg_stat_statements')
-    parser.add_argument('--profile',choices=('decade','gradual','extended'),default='decade',help='Gradual: 10/50/100/150; extended: 100/150/200/250 requests/s, then recovery')
+    parser.add_argument('--profile',choices=('decade','gradual','extended','full','higher'),default='decade',help='Gradual: 10/50/100/150; extended: 100/150/200/250; full: 10/50/100/150/200/250; higher: 500/750/1000 requests/s, then recovery')
     parser.add_argument('--keep-gateway-running',action='store_true',help='Reuse a running gateway between stages with identical policy and limits')
     parser.add_argument('--concurrency',type=int,default=5000)
-    parser.add_argument('--max-rate',type=int,choices=(10,50,100,150,200,250,1000,10000),default=10000)
+    parser.add_argument('--min-rate',type=int,default=10,help='Minimum offered requests/s; recovery is always retained')
+    parser.add_argument('--max-rate',type=int,choices=(10,50,100,150,200,250,500,750,1000,10000),default=10000)
     parser.add_argument('--min-free-disk-percent',type=int,default=30)
-    parser.add_argument('--gateway-memory-mib',type=int,choices=(512,1024,2048,4096,8192),default=512,help='Local experiment only; restores the previous container limit afterward')
+    parser.add_argument('--gateway-memory-mib',type=int,choices=(512,1024,2048,4096,8192,16384,32768),default=512,help='Local experiment only; restores the previous container limit afterward')
     parser.add_argument('--provider-memory-mib',type=int,choices=(512,1024,2048,4096),default=512,help='Isolated mock backend limit; restores its original launch afterward')
     args=parser.parse_args();os.umask(0o077)
-    rows=[p for p in plan(duration=args.duration,concurrency=args.concurrency,profile=args.profile)
-          if p['offered_rps']<=args.max_rate]
+    rows=select_phases(plan(duration=args.duration,concurrency=args.concurrency,profile=args.profile),
+                       minimum=args.min_rate,maximum=args.max_rate)
     soft,_=resource.getrlimit(resource.RLIMIT_NOFILE)
     if soft<args.concurrency+256:parser.error('Generator needs at least '+str(args.concurrency+256)+' file descriptors; current soft limit is '+str(soft)+'. Raise this process limit within the host hard limit, or lower concurrency.')
     builder=base.load('build-stress-provider.py','stress_image_inputs')
@@ -261,6 +262,8 @@ def main():
         if controller.output.exists():
             controller.summary['capacity_qualified']=False
             controller.summary['failure_type']=type(error).__name__
+            if isinstance(error,base.local_probe.ProbeError):
+                controller.summary['failure_probe']={'operation':error.operation,'kind':error.kind}
             try:
                 records=json.loads(fixture.run('inspect',*[lab.POD+'-'+name for name in base.component_metrics.COMPONENTS]))
                 lab.write(controller.output,'failure-services.json',[{'name':r['Name'],'state':{k:r['State'].get(k) for k in ('Running','OOMKilled','ExitCode','FinishedAt')},'memory_limit_bytes':r['HostConfig']['Memory']} for r in records])

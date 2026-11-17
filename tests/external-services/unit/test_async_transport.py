@@ -48,11 +48,18 @@ class AsyncTransportTest(unittest.IsolatedAsyncioTestCase):
         await self.server.close()
         self.temp.cleanup()
 
-    def client(self, ca=None):
+    def client(self, ca=None, concurrency=2):
         work = dict(input_tokens=128,output_tokens=32,ttft_ms=0,chunk_ms=0,task='synthetic probe')
         return AsyncTransport(self.url,ca or self.root/'ca.pem',['test-key'],'fixture',
             profiles=[{'model':'fixture','api':'openai','workload':work}],
-            user_agents=['synthetic-test'],concurrency=2)
+            user_agents=['synthetic-test'],concurrency=concurrency)
+
+    async def test_large_connector_limit_is_explicit_and_bounded(self):
+        async with self.client(concurrency=40000) as client:
+            self.assertEqual(client.session.connector.limit,40000)
+            self.assertEqual(client.session.connector.limit_per_host,40000)
+        for bound in (0,40001,True):
+            with self.assertRaises(ValueError):self.client(concurrency=bound)
 
     async def test_verified_tls_usage_and_bounded_slow_instruction(self):
         async with self.client() as client:

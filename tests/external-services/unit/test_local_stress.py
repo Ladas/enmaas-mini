@@ -75,7 +75,7 @@ class MemoryExperiment(unittest.TestCase):
             c.restoring=True;c.restart(b'changed');self.assertEqual(parent.call_count,4)
 
     def test_override_is_applied_only_during_experiment(self):
-        for limit in (512,1024,2048,4096,8192):
+        for limit in (512,1024,2048,4096,8192,16384,32768):
             with self.subTest(memory_mib=limit):
                 c=stress.Controller('fixture');c.gateway_memory_mib=limit;c.original_gateway_memory=536870912
                 with patch.object(stress.base.LocalController,'restart') as parent,patch.object(stress.fixture,'run') as command:

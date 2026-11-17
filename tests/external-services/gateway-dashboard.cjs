@@ -19,7 +19,7 @@ const pin=createHash('sha256').update(cert.publicKey.export({type:'spki',format:
   await page.locator('#username').fill('admin');await page.locator('#password').fill(user.admin);
   await page.locator('#kc-login').click();
   await page.waitForURL(url=>url.origin==='https://localhost:19443');
-  const expected=JSON.parse(readFileSync(`${__dirname}/perses/${dashboard}-dashboard.json`));
+  const expected=JSON.parse(readFileSync(`${root}/${dashboard}-dashboard.json`));
   const queries=Object.values(expected.spec.panels).filter(p=>p.spec.queries).map(p=>p.spec.queries[0].spec.plugin.spec.query);
   const samples=new Set();const pending=[];
   page.on('response',response=>{

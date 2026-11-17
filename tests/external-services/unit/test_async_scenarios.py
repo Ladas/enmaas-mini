@@ -35,11 +35,38 @@ class AsyncScenarios(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(result['errors'].get('TimeoutError', 0), 0)
         self.assertEqual(result['statuses'].get('200', 0), 0)
 
+    async def test_large_cap_does_not_force_large_offered_load(self):
+        async def request(user, timeout):return {'status':200}
+        result=await async_scenarios.run_phase(request,users=1,concurrency=40000,
+            duration=.02,offered_rps=10,timeout=1)
+        self.assertLessEqual(result['peak_in_flight'],1)
+        self.assertEqual(result['skipped_concurrency'],0)
+
+    async def test_completed_tasks_waiting_for_callbacks_are_not_active(self):
+        from unittest.mock import patch
+        class DeferredDiscardTask(asyncio.Task):
+            def add_done_callback(self, callback, *, context=None):
+                if getattr(callback, '__name__', '') == 'discard':
+                    def delayed(task):
+                        self.get_loop().call_later(.2, callback, task)
+                    return super().add_done_callback(delayed, context=context)
+                return super().add_done_callback(callback, context=context)
+        samples=[]
+        async def request(user, timeout):return {'status':200}
+        with patch.object(async_scenarios.asyncio, 'create_task', side_effect=DeferredDiscardTask):
+            result=await async_scenarios.run_phase(request, users=1, concurrency=1,
+                duration=1.15, offered_rps=10, timeout=1, sample=samples.append)
+        self.assertEqual(result['skipped_concurrency'], 0)
+        self.assertEqual(result['peak_in_flight'], 1)
+        self.assertEqual(result['statuses'], {'200':11})
+        for snapshot in samples:
+            self.assertEqual(snapshot['dispatched'], snapshot['completed']+snapshot['active_requests'])
+
     async def test_bounds_and_external_cancellation(self):
         async def request(user, timeout):
             await asyncio.sleep(10)
         with self.assertRaises(ValueError):
-            await async_scenarios.run_phase(request, users=1, concurrency=20001,
+            await async_scenarios.run_phase(request, users=1, concurrency=40001,
                 duration=1, offered_rps=10000, timeout=150)
         task = asyncio.create_task(async_scenarios.run_phase(request, users=1,
             concurrency=2, duration=10, offered_rps=100, timeout=150))
@@ -70,3 +97,15 @@ class AsyncScenarios(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(samples[-1]['errors'],result['errors'])
         self.assertEqual(samples[0]['statuses'],{})
         self.assertNotIn('credential-sentinel',str(samples))
+
+    async def test_os_error_categories_never_retain_exception_details(self):
+        import errno
+        samples=[]
+        class ConnectorFailure(Exception):
+            os_error=OSError(errno.EADDRNOTAVAIL,'private URL or credential')
+        async def request(user,timeout):raise ConnectorFailure('private URL or credential')
+        result=await async_scenarios.run_phase(request,users=1,concurrency=2,
+            duration=.05,offered_rps=100,timeout=1,sample=samples.append)
+        self.assertGreater(result['os_errors']['EADDRNOTAVAIL'],0)
+        self.assertEqual(samples[-1]['os_errors'],result['os_errors'])
+        self.assertNotIn('private',str(result)+str(samples))

@@ -1,6 +1,6 @@
 """The capacity staircase must distinguish offered load from achieved throughput."""
 import unittest
-from stress_plan import plan, escalation_stop
+from stress_plan import plan, escalation_stop, select_phases
 
 class StressPlan(unittest.TestCase):
     def test_default_staircase_and_recovery(self):
@@ -21,8 +21,32 @@ class StressPlan(unittest.TestCase):
         self.assertEqual(rows[-1]['name'],'stress_recovery')
         with self.assertRaises(ValueError):plan(profile='unbounded')
 
+    def test_full_profile_includes_low_load_and_retains_final_recovery(self):
+        rows=plan(profile='full',concurrency=40000)
+        self.assertEqual([r['offered_rps'] for r in rows],[10,50,100,150,200,250,10])
+        self.assertEqual([r['name'] for r in rows if r['name']=='stress_recovery'],['stress_recovery'])
+        self.assertEqual(rows[-1]['name'],'stress_recovery')
+        self.assertEqual({r['rate_limit_rps'] for r in rows},{1000})
+
+    def test_higher_profile_is_bounded_and_can_isolate_500_rps(self):
+        rows=plan(profile='higher',concurrency=40000)
+        self.assertEqual([r['offered_rps'] for r in rows],[500,750,1000,10])
+        self.assertEqual({r['concurrency'] for r in rows},{40000})
+        self.assertTrue(all(r['rate_limit_rps']>r['offered_rps'] for r in rows))
+        selected=select_phases(rows,minimum=500,maximum=500)
+        self.assertEqual([r['name'] for r in selected],['stress_500','stress_recovery'])
+
+    def test_targeted_probe_preserves_recovery(self):
+        rows=select_phases(plan(profile='extended',concurrency=40000),minimum=200,maximum=200)
+        self.assertEqual([row['offered_rps'] for row in rows],[200,10])
+        self.assertEqual(rows[-1]['name'],'stress_recovery')
+        self.assertEqual({row['concurrency'] for row in rows},{40000})
+        for minimum,maximum in ((250,100),(300,400),(True,200)):
+            with self.assertRaises(ValueError):
+                select_phases(plan(profile='extended'),minimum=minimum,maximum=maximum)
+
     def test_invalid_bounds_rejected(self):
-        for kwargs in ({'duration':0},{'duration':3601},{'concurrency':20001},{'concurrency':True}):
+        for kwargs in ({'duration':0},{'duration':3601},{'concurrency':40001},{'concurrency':True}):
             with self.assertRaises(ValueError):plan(**kwargs)
 
     def test_capacity_limit_is_not_gateway_failure(self):
@@ -42,10 +66,10 @@ class StressPlan(unittest.TestCase):
 
 class ExpandedCapacity(unittest.TestCase):
     def test_expanded_profile_reaches_above_old_generator_ceiling(self):
-        rows=plan(profile='extended',concurrency=20000)
+        rows=plan(profile='extended',concurrency=40000)
         self.assertEqual([r['offered_rps'] for r in rows],[100,150,200,250,10])
-        self.assertEqual({r['concurrency'] for r in rows},{20000})
+        self.assertEqual({r['concurrency'] for r in rows},{40000})
         self.assertEqual(rows[-1]['name'],'stress_recovery')
-        with self.assertRaises(ValueError):plan(concurrency=20001)
+        with self.assertRaises(ValueError):plan(concurrency=40001)
 
 if __name__=='__main__':unittest.main()

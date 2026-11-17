@@ -22,8 +22,8 @@ class StressSignals(unittest.TestCase):
         row['request_bytes']=-1
         with self.assertRaises(ValueError):payload(row,512)
 
-    def test_twenty_thousand_cap_is_reported_without_clamping(self):
-        metrics=payload(dict.fromkeys(FIELDS,0),20000)['resourceMetrics'][0]['scopeMetrics'][0]['metrics']
+    def test_forty_thousand_cap_is_reported_without_clamping(self):
+        metrics=payload(dict.fromkeys(FIELDS,0),40000)['resourceMetrics'][0]['scopeMetrics'][0]['metrics']
         cap=next(m for m in metrics if m['name']=='enmaas_stress_concurrency_limit')
-        self.assertEqual(cap['gauge']['dataPoints'][0]['asDouble'],20000)
-        with self.assertRaises(ValueError):payload({},20001)
+        self.assertEqual(cap['gauge']['dataPoints'][0]['asDouble'],40000)
+        with self.assertRaises(ValueError):payload({},40001)

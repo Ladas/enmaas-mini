@@ -21,6 +21,59 @@ phase=load('phase','phase-metrics.py')
 result=load('result','monitoring-result.py')
 
 class Monitoring(unittest.TestCase):
+    def test_failed_trace_table_preserves_inference_scope_and_detail_links(self):
+        document=monitor.all_dashboards()['traces-dashboard.json']['spec']
+        panel=document['panels']['errors']['spec']
+        query=panel['queries'][0]['spec']['plugin']['spec']['query']
+        self.assertIn('span.enmaas.request.kind = "inference"',query)
+        self.assertIn('status = error',query)
+        self.assertEqual(panel['plugin']['spec']['links'],document['panels']['0']['spec']['plugin']['spec']['links'])
+        self.assertIn('not a count of HTTP 5xx',panel['display']['description'])
+
+
+    def test_status_log_links_preserve_time_and_select_structured_metadata(self):
+        from urllib.parse import urlparse, parse_qs
+        docs=monitor.all_dashboards()
+        link=monitor.status_logs_link('5xx')
+        query=parse_qs(urlparse(link['url']).query)
+        self.assertEqual(query['start'],['${__from}'])
+        self.assertEqual(query['end'],['${__to}'])
+        variables={v['spec']['name']:v['spec'] for v in docs['logs-dashboard.json']['spec']['variables']}
+        for name in ('log_service','log_status'):
+            values=[v['value'] for v in variables[name]['plugin']['spec']['values']]
+            self.assertIn(query['var-'+name][0],values)
+        log_query=docs['logs-dashboard.json']['spec']['panels']['0']['spec']['queries'][0]['spec']['plugin']['spec']['query']
+        self.assertIn('http_response_status_code',log_query)
+        self.assertNotIn('| json',log_query)
+        self.assertIn('not zero gateway errors',docs['logs-dashboard.json']['spec']['panels']['0']['spec']['display']['description'])
+        with self.assertRaises(ValueError):monitor.status_logs_link('invalid')
+
+    def test_generator_concurrency_uses_outstanding_outcomes(self):
+        docs=monitor.dashboards()
+        panel=docs['benchmark-dashboard.json']['spec']['panels']['concurrency']['spec']
+        query=panel['queries'][0]['spec']['plugin']['spec']['query']
+        self.assertIn('enmaas_stress_dispatched - enmaas_stress_completed',query)
+        self.assertNotIn('enmaas_stress_active_requests',query)
+
+    def test_main_shows_named_control_plane_services_and_limits(self):
+        docs=monitor.dashboards()
+        main=docs['monitoring-dashboard.json']['spec']['panels']
+        for key,name,component_id in (('maas','MaaS Standalone','maas'),('metering','PriceTag Metering','metering-sso')):
+            cpu=main[key+'cpu']['spec'];memory=main[key+'memory']['spec']
+            self.assertIn(name,cpu['display']['name'])
+            self.assertIn(name,memory['display']['name'])
+            self.assertEqual(len(memory['queries']),2)
+            for panel in (cpu,memory):
+                for query in panel['queries']:
+                    expression=query['spec']['plugin']['spec']['query']
+                    self.assertIn('component="'+component_id+'"',expression)
+                    self.assertIn('host=~"$host"',expression)
+                    self.assertNotIn('sum(',expression)
+            self.assertIn('memory_limit_bytes',memory['queries'][1]['spec']['plugin']['spec']['query'])
+        for key in ('loadcpu','loadmemory'):
+            query=docs['benchmark-dashboard.json']['spec']['panels'][key]['spec']['queries'][0]['spec']['plugin']['spec']['query']
+            self.assertIn('maas',query)
+
     def test_http_status_classes_are_separate_adjacent_panels(self):
         document=monitor.dashboards()['monitoring-dashboard.json']['spec']
         boxes=[]
@@ -226,6 +279,16 @@ class Monitoring(unittest.TestCase):
         self.assertIn('new,target=/lab/config,mode=0444',actual)
         self.assertIn('tls,target=/lab/key,mode=0444',actual)
         self.assertIn('--read-only',actual);self.assertIn('ALL',actual)
+
+    def test_every_capacity_profile_has_valid_phase_telemetry(self):
+        from stress_plan import plan
+        for profile in ('decade','gradual','extended','full','higher'):
+            for row in plan(profile=profile,concurrency=40000):
+                with self.subTest(profile=profile,phase=row['name']):
+                    metrics=phase.payload(row,now=1000)['resourceMetrics'][0]['scopeMetrics'][0]['metrics']
+                    points=metrics[0]['gauge']['dataPoints']
+                    active=[p['attributes'][0]['value']['stringValue'] for p in points if p['asDouble']==1]
+                    self.assertEqual(active,[row['name']])
 
     def test_scenario_annotations_are_bounded_and_clear_old_phase(self):
         row={'name':'team','users':25,'streams_per_user':4,'offered_rps':30,'rate_limit_rps':1000,'cycle':2}

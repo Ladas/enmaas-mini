@@ -106,7 +106,7 @@ def phase_shading(axes,phases,start):
     for index,phase in enumerate(phases):
         left=(stamp(phase['started_utc'])-start)/60;right=(stamp(phase['ended_utc'])-start)/60
         for ax in axes:ax.axvspan(left,right,alpha=.06,color='blue' if index%2 else 'gray')
-        axes[0].text((left+right)/2,1.02,str(phase['name'])+' / '+str(phase.get('cycle',1)),transform=axes[0].get_xaxis_transform(),ha='center',fontsize=8)
+        axes[0].text((left+right)/2,1.02,f'P{index+1:02d}',transform=axes[0].get_xaxis_transform(),ha='center',fontsize=7,rotation=90)
 
 
 def host_graph(plt,directory,records,phases,start):
@@ -150,15 +150,21 @@ def capacity_table(data):
       '</tr></thead><tbody>'+''.join(rows)+'</tbody></table>')
 
 
+def stress_tick(index,phase):
+    rate='Recovery' if phase['name'].split(' / ')[-1]=='stress_recovery' else str(phase['offered_rps'])+'/s'
+    return f'P{index+1:02d}\n'+rate
+
+
 def stress_graph(plt,directory,phases):
     if not all('offered_slots' in p and 'dispatched' in p for p in phases):return False
     x=list(range(len(phases)))
     offered=[number(p['offered_rps']) for p in phases]
     dispatched=[number(p['dispatched'])/max(number(p['admission_seconds']),1e-9) for p in phases]
     completed=[number(p['completed_rps']) for p in phases]
+    successful=[number(p['statuses'].get('200',0))/max(number(p['elapsed_seconds']),1e-9) for p in phases]
     fig,axes=plt.subplots(3,1,figsize=(12,9),sharex=True,layout='constrained')
-    for values,label in ((offered,'Offered target'),(dispatched,'Dispatched / admission time'),(completed,'Completed / total time including drain')):
-        axes[0].plot(x,values,marker='o',label=label)
+    for values,label,color in ((offered,'Offered target','tab:blue'),(dispatched,'Dispatched / admission time','tab:orange'),(completed,'All outcomes / time including drain','tab:gray'),(successful,'HTTP 200 / time including drain','tab:green')):
+        axes[0].plot(x,values,marker='o',label=label,color=color)
     axes[0].set_ylabel('Requests / second')
     if max(offered)>100:axes[0].set_yscale('symlog',linthresh=1)
     axes[0].set_ylim(bottom=0)
@@ -168,8 +174,10 @@ def stress_graph(plt,directory,phases):
     for key,label in (('skipped_concurrency','Concurrency cap'),('skipped_scheduler','Scheduler delay')):
         axes[2].plot(x,[100*number(p[key])/max(number(p['offered_slots']),1) for p in phases],marker='o',label=label)
     axes[2].set_ylabel('Offered admissions skipped (%)');axes[2].set_ylim(0,100)
-    axes[2].set_xticks(x,['Recovery' if p['name']=='stress_recovery' else str(p['offered_rps'])+' offered req/s' for p in phases])
-    for ax in axes:ax.grid(alpha=.2);ax.legend(loc='upper left')
+    axes[2].set_xticks(x,[stress_tick(i,p) for i,p in enumerate(phases)],fontsize=8)
+    axes[2].set_xlabel('Phase ID / offered requests per second; IDs match the results table')
+    for ax in axes:ax.grid(alpha=.2);ax.legend(loc='upper left',fontsize=8)
+    axes[0].legend(loc='lower center',bbox_to_anchor=(.5,1.01),ncols=2,fontsize=8)
     fig.savefig(directory/'staircase.png',dpi=150);plt.close(fig)
     return True
 
@@ -210,9 +218,9 @@ def render(directory):
     has_host=host_graph(plt,directory,records,phases,start)
     has_stress=stress_graph(plt,directory,phases)
     rows=[]
-    for phase in phases:
+    for index,phase in enumerate(phases):
         concurrency=(str(phase['streams_per_user'])+' per user' if 'streams_per_user' in phase else str(phase['max_in_flight'])+' shared cap')
-        values=[phase['name'],phase['users'],concurrency,phase['target_seconds'],
+        values=[f"P{index+1:02d} — {phase['name']} / cycle {phase.get('cycle',1)}",phase['users'],concurrency,phase['target_seconds'],
                 phase['attempts'],phase['statuses'].get('200',0),phase['statuses'].get('429',0),
                 f"{number(phase['completed_rps']):.2f}",
                 number(phase['peak_in_flight']) if 'peak_in_flight' in phase else 'not measured',
@@ -224,11 +232,11 @@ def render(directory):
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'unsafe-inline'">
 <title>Mock gateway benchmark</title><style>body{font:16px system-ui;margin:2rem auto;max-width:1200px;padding:0 1rem}table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:.6rem;border-bottom:1px solid #ccc}img{max-width:100%}p{line-height:1.5}</style>
 <h1>Mock gateway benchmark</h1>'''+failure_notice(summary)+'''<p>'''+html.escape(status)+'''</p>
-<p>Deterministic mock providers. Connection policy is recorded in the run summary; asynchronous runs use a bounded HTTPS connection pool. These measurements describe this run, not a production capacity guarantee. Component CPU is measured in CPU seconds per elapsed second: one fully busy vCPU equals one core. The separate host CPU percentage uses all vCPUs as 100%. New containers have no CPU point until a second sample; restarts break the series. Memory is the container statistic, not Linux host availability. Shading marks active phase intervals; gaps include restarts and sampling.</p>
+<p>Deterministic mock providers. Connection policy is recorded in the run summary; asynchronous runs use a bounded HTTPS connection pool. These measurements describe this run, not a production capacity guarantee. Component CPU is measured in CPU seconds per elapsed second: one fully busy vCPU equals one core. The separate host CPU percentage uses all vCPUs as 100%. New containers have no CPU point until a second sample; restarts break the series. Memory is the container statistic, not Linux host availability. Shading marks active phase intervals; short phase IDs match the results table. Gaps include restarts and sampling.</p>
 <table><thead><tr><th>Phase</th><th>Users</th><th>Concurrency configuration</th><th>Target seconds</th><th>Attempts</th><th>HTTP 200</th><th>HTTP 429</th><th>Completed requests/s</th><th>Observed peak in flight</th><th>Observed mean in flight</th></tr></thead><tbody>'''+''.join(rows)+'''</tbody></table>
 <h2>Service resources over time</h2><img src="resources.png" alt="Container CPU and memory measurements across workload phases"></html>'''
     if has_stress:
-        document=document.replace('</html>','<h2>Offered load and generator limits</h2><p>Dispatch rate uses admission time; completion rate includes request draining. Skipped admissions never reached the gateway. A skipped stage is not an achieved target.</p><img src="staircase.png" alt="Offered, dispatched and completed traffic with concurrency and skipped admissions"></html>')
+        document=document.replace('</html>','<h2>Offered load and generator limits</h2><p>Dispatch rate uses admission time; all-outcome and HTTP 200 rates include request draining. All outcomes include errors; HTTP 200 shows successful responses. Skipped admissions never reached the gateway. A skipped stage is not an achieved target.</p><img src="staircase.png" alt="Offered, dispatched and completed traffic with concurrency and skipped admissions"></html>')
     if (directory/'capacity-summary.json').exists():
         document=document.replace('</html>',capacity_table(json.loads(read(directory/'capacity-summary.json')))+'</html>')
     people=summary.get('synthetic_personas',{})

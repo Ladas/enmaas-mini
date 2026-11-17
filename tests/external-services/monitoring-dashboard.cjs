@@ -16,7 +16,7 @@ const requireStress=process.argv.includes('--require-stress');
 const requireContinuous=process.argv.includes('--require-continuous-data');
 const requireGenerator=process.argv.includes('--require-generator-alert');
 const definitionIndex=process.argv.indexOf('--definitions');
-const definitions=definitionIndex<0?`${__dirname}/perses`:process.argv[definitionIndex+1];
+const definitions=definitionIndex<0?root:process.argv[definitionIndex+1];
 if(!definitions)throw new Error('Missing dashboard definition directory');
 const atIndex=process.argv.indexOf('--at');
 const at=atIndex<0?null:Number(process.argv[atIndex+1]);
@@ -230,23 +230,58 @@ let stage='start';
    evidence.dashboards.push(name);
   }
   stage='links';await page.goto(`https://localhost:19443/projects/praxis/dashboards/enmaas-monitoring?${range}`);
-  const link=page.getByRole('link',{name:'Accounting / DB',exact:true}).first();
+  const link=page.getByRole('link',{name:'Database & usage metering',exact:true}).first();
   await link.scrollIntoViewIfNeeded();await page.waitForTimeout(500);
   const bounds=await link.boundingBox();assert(bounds,'visible details link');
   await page.mouse.click(bounds.x+bounds.width/2,bounds.y+bounds.height/2);
   await page.waitForURL('**/enmaas-accounting*');
   evidence.detailNavigation=true;
 
+  stage='status log links';evidence.statusLogNavigation=[];
+  const linkEnd=at===null?Date.now():at*1000,linkStart=linkEnd-windowSeconds*1000;
+  for(const [status,title] of [['3xx','redirects'],['4xx','client and policy rejections'],['5xx','server errors']]) {
+   await page.goto(`https://localhost:19443/projects/praxis/dashboards/enmaas-monitoring?start=${linkStart}&end=${linkEnd}&refresh=0s`);
+   await page.getByText('Host CPU used',{exact:true}).first().waitFor();
+   const heading=page.getByText(status+' — '+title,{exact:true}).first();
+   await page.mouse.move(12,600);await reveal(page,heading);await heading.hover();
+   const menu=heading.locator('..').locator('button[aria-label="Panel-links"]:visible').last();
+   const box=await menu.boundingBox();assert(box,'status panel links visible');
+   await page.mouse.click(box.x+box.width/2,box.y+box.height/2);
+   const expression=status[0]+'[0-9][0-9]';
+   const pending=page.waitForResponse(response=>response.url().includes('loki/api/v1/query_range')&&decodeURIComponent(response.url()).includes(expression));
+   await page.getByRole('menuitem',{name:'View '+status+' logs',exact:true}).click();
+   await page.waitForURL('**/enmaas-logs?*');
+   const destination=new URL(page.url());
+   assert.equal(destination.searchParams.get('start'),String(linkStart));
+   assert.equal(destination.searchParams.get('end'),String(linkEnd));
+   assert.equal(destination.searchParams.get('var-log_status'),expression);
+   const response=await pending;assert.equal(response.status(),200);
+   assert.equal((await response.json()).status,'success','filtered Loki query succeeds, including empty results');
+   evidence.statusLogNavigation.push(status);
+  }
+
   if(!onlyMain) {
    stage='traces';
    const traceEnd=at??Math.floor(Date.now()/1000);
    const search=await context.request.get('https://localhost:19443/proxy/globaldatasources/tempo/api/search?q='+encodeURIComponent('{resource.service.name =~ "enmaas-gateway.*" && span.enmaas.request.kind = "inference"}')+'&limit=20&start='+(traceEnd-windowSeconds)+'&end='+traceEnd);
    assert.equal(search.status(),200);assert((await search.json()).traces?.length,'actual inference traces');
+   const errors=await context.request.get('https://localhost:19443/proxy/globaldatasources/tempo/api/search?q='+encodeURIComponent('{resource.service.name =~ "enmaas-gateway.*" && span.enmaas.request.kind = "inference" && status = error}')+'&limit=20&start='+(traceEnd-windowSeconds)+'&end='+traceEnd);
+   assert.equal(errors.status(),200);const failedTraces=(await errors.json()).traces||[];
+   assert(Array.isArray(failedTraces),'failed trace search succeeds, including an empty sampled result');
+   evidence.failedTraceSearch=true;
    await page.goto(`https://localhost:19443/projects/praxis/dashboards/enmaas-traces?${range}`);
    await page.getByText('Recent inference traces',{exact:true}).waitFor();
-   const trace=page.getByRole('row').nth(1).getByRole('link');await trace.scrollIntoViewIfNeeded();
+   await reveal(page,page.getByText('Failed inference traces',{exact:true}));
+   stage='trace detail navigation';
+   const href=await page.locator('a[href*="enmaas-trace-detail?"]').evaluateAll(links=>links.find(link=>{const r=link.getBoundingClientRect();return r.top>160&&r.bottom<innerHeight;})?.getAttribute('href'));
+   assert(href?.startsWith('/projects/praxis/dashboards/enmaas-trace-detail?'),'visible trace link');
+   const trace=page.locator('a[href="'+href+'"]').first();
    if(record)await page.waitForTimeout(3000);
-   const bounds=await trace.boundingBox();assert(bounds);await page.mouse.click(bounds.x+bounds.width/2,bounds.y+bounds.height/2);
+   // Perses' non-selectable table inherits aria-disabled; its links still accept normal pointer clicks.
+   const bounds=await trace.boundingBox();assert(bounds);
+   const point={x:bounds.x+bounds.width/2,y:bounds.y+bounds.height/2};
+   assert(await trace.evaluate((link,p)=>link.contains(document.elementFromPoint(p.x,p.y)),point),'trace link is not covered');
+   await page.mouse.click(point.x,point.y);
    await page.getByText('Request spans',{exact:true}).waitFor();await page.getByText('Service & Operation',{exact:true}).waitFor();
    if(record)await page.waitForTimeout(4000);
    evidence.inferenceTraceNavigation=true;

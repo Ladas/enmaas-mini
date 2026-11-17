@@ -41,8 +41,9 @@ The **Main monitoring** dashboard contains operational measurements only:
 - **Gateway:** public response rate by route/status, concurrent requests, mean stream duration, internal upstream outcomes and file-descriptor utilization.
 - **Hosts:** select one or more hosts. CPU, memory pressure and disk capacity remain separate series per host; there is no fleet-wide host percentage.
 - **Gateway resources:** CPU cores, memory and configured memory limits per selected host and instance.
+- **MaaS Standalone and PriceTag Metering:** separate CPU-core and memory timelines for each service, host and instance. Each memory chart includes its configured ceiling; compare both services with traffic and database activity.
 - **Database:** select a PostgreSQL source independently from Host. View connections, size, committed transactions, lock waiters, deadlocks and temporary writes.
-- **Accounting and alerts:** fleet-wide insert failures, pool waiting and operational alerts. Generator alerts are excluded.
+- **Usage recording and alerts:** fleet-wide insert failures, pool waiting and operational alerts. Generator alerts are excluded.
 
 The **Host** selector applies to resource charts only. Gateway HTTP and accounting exports currently lack a verified host mapping, so those sections explicitly remain fleet-wide. The collector’s `instance` label is not a gateway-host identity. Per-host HTTP attribution requires adding a bounded host/gateway identity at collection; do not infer it from a scrape endpoint.
 
@@ -291,11 +292,23 @@ Separate, adjacent **3xx**, **4xx** and **5xx** panels remain independent of tha
 filter. Each shows requests/second over two minutes. A zero needs observed public
 request counters and fresh gateway telemetry; missing telemetry stays unavailable.
 4xx includes expected authentication, quota and rate-limit enforcement.
+Fast failures can lower aggregate mean latency: compare successful throughput
+and failure counts before treating a shorter duration as an improvement.
 
 The throughput and status panels include a **Logs** link to the Loki-backed
-service-events dashboard. Select the same time window there when investigating a
-historical spike. These are sanitized service events, not an exhaustive per-request
-access log; a response does not necessarily have a corresponding log entry.
+service-events dashboard. The status panels also provide **View 3xx/4xx/5xx logs**:
+these select the gateway service, matching structured HTTP status codes and the
+current time window. The routed-throughput panel in Gateway detail also includes **View 5xx logs**.
+
+On the log page, use **Service** and **HTTP status** to broaden the search. A
+filtered empty result means no matching collected events, not zero gateway errors.
+HTTP filtering requires retained `http.response.status_code` metadata; the current
+local relay does not mount gateway application logs. Metrics and sampled traces
+remain available when those logs were not collected. Sanitized diagnostic events
+are not exhaustive access logs, and a response need not have a corresponding event.
+A time-window link does not establish exact trace correlation without matching
+trace IDs. Original messages, request bodies and authorization headers remain
+excluded.
 
 ### Host, service and instance labels
 
@@ -305,3 +318,54 @@ Praxis gateway container, and `primary` is the default instance alias. It does n
 indicate leader election or a failover relationship. The **Database & usage metering**
 dashboard covers PostgreSQL and usage-event processing; spending views remain in
 PriceTag. Its existing `enmaas-accounting` URL is retained for link compatibility.
+
+### Verify populated persona views
+
+After provisioning the local Super admin, Alice manager and Bob individual with
+mock usage, run this read-only check from the checkout (set `LAB_DIR` to the
+private fixture directory):
+
+```sh
+NODE_EXTRA_CA_CERTS="$LAB_DIR/ca.pem" node tests/external-services/persona-dashboard.cjs "$LAB_DIR"
+```
+
+It verifies organization/team/personal data, rejects out-of-team API requests and
+checks that a personal usage query cannot select another user. It does not create
+missing identities or generate usage. An unprovisioned Bob correctly fails SSO;
+configure the persona before recording. Screenshots and a nonsecret result summary
+are written inside the private fixture directory. Playwright must be installed as
+for the other dashboard checks above.
+
+### Benchmark client failures
+
+The Benchmark dashboard also alerts when more than **5% of terminal outcomes**
+are unsuccessful for one minute, after at least 100 outcomes. In-flight requests
+are excluded. HTTP rejections, transport failures and response-validation failures
+all count; inspect the report to distinguish them. This does not assign fault to
+the gateway. The alert clears on fresh, healthy recovery data and stops using
+samples older than 30 seconds.
+
+### MaaS Standalone and PriceTag Metering
+
+Main monitoring includes named CPU and memory timelines for both services.
+Memory panels also show each container’s configured limit; separate lines retain
+host and instance identity. The Benchmark dashboard includes both services in
+its load-versus-CPU and load-versus-memory comparisons. The underlying component
+labels are `maas` and `metering-sso`.
+
+CPU and memory are resource measurements, not API-health checks. Sampling can miss
+a brief memory spike before an OOM; use the saved failure state and telemetry gaps
+as well as the charts. PriceTag database-pool and usage-ingestion metrics remain
+in **Database & usage metering**.
+
+### Outstanding generator requests
+
+The Benchmark concurrency chart derives outstanding requests as dispatched minus
+completed outcomes. This excludes completed tasks whose asynchronous cleanup
+callbacks have not run yet. It includes requests still being validated by the
+client; compare it with the gateway’s own active-request metric rather than
+expecting the two boundaries to match exactly.
+
+### Find a failed inference trace
+
+Open **Inference traces → Failed inference traces**. This table filters sampled inference spans marked as errors and links to their span details. Check the HTTP status in the selected trace; span errors are not an HTTP 5xx counter. An empty table does not prove there were no failures. Use the gateway response metrics and the time-window links to sanitized Loki events alongside it.

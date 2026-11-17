@@ -35,10 +35,10 @@ def instruction(body, common):
 
 
 class Capacity:
-    def __init__(self, maximum=20000):
-        if type(maximum) is not int or not 1 <= maximum <= 20000:
+    def __init__(self, maximum=40000):
+        if type(maximum) is not int or not 1 <= maximum <= 40000:
             raise ValueError('Invalid mock concurrency bound')
-        self.maximum, self.active, self.rejected = maximum, 0, 0
+        self.maximum, self.active, self.rejected, self.peak = maximum, 0, 0, 0
 
 
 def application(common, models, key, api, capacity):
@@ -48,6 +48,9 @@ def application(common, models, key, api, capacity):
                       (api == 'anthropic' and request.headers.get('x-api-key') == key))
         if not authorized:
             return web.json_response({'error':'unauthorized'}, status=401)
+        if request.method == 'GET' and request.path == '/__enmaas/capacity':
+            return web.json_response({'maximum':capacity.maximum,'active':capacity.active,
+                                      'peak':capacity.peak,'rejected':capacity.rejected})
         if request.method == 'GET' and request.path == '/v1/models':
             return web.json_response({'object':'list', 'data':[{'id':m,'object':'model'} for m in models]})
         allowed = ('/v1/messages',) if api == 'anthropic' else ('/v1/chat/completions','/v1/responses')
@@ -66,6 +69,7 @@ def application(common, models, key, api, capacity):
             capacity.rejected += 1
             return web.json_response({'error':'mock concurrency ceiling'}, status=503)
         capacity.active += 1
+        capacity.peak = max(capacity.peak,capacity.active)
         try:
             result = common.completion(request.path, body, False, declared_tools_only=True)
             incoming, outgoing = work['input_tokens'], work['output_tokens']

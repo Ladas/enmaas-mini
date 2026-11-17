@@ -21,11 +21,11 @@ def inputs():
              'stream_payload.py':(HERE/'stream_payload.py').read_bytes(),
              'provider.py':(ROOT/'tests/common/provider.py').read_bytes()}
     files['Containerfile'] = (f'FROM {base}\n'
-        'COPY requirements.txt /tmp/requirements.txt\n'
+        'COPY --chmod=0644 requirements.txt /tmp/requirements.txt\n'
         'RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt\n'
-        'COPY provider.py /fixtures/provider.py\n'
-        'COPY async_provider.py /fixtures/async_provider.py\n'
-        'COPY stream_payload.py /fixtures/stream_payload.py\n'
+        'COPY --chmod=0644 provider.py /fixtures/provider.py\n'
+        'COPY --chmod=0644 async_provider.py /fixtures/async_provider.py\n'
+        'COPY --chmod=0644 stream_payload.py /fixtures/stream_payload.py\n'
         'USER 65532:65532\n'
         'ENTRYPOINT ["python3","-B","/fixtures/async_provider.py"]\n').encode()
     digest = hashlib.sha256(b''.join(k.encode()+b'\0'+v for k,v in sorted(files.items()))).hexdigest()

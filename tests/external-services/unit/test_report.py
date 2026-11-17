@@ -3,11 +3,35 @@ import importlib.util
 import math
 from pathlib import Path
 import unittest
+from unittest.mock import MagicMock
 
 spec=importlib.util.spec_from_file_location('report',(Path(__file__).resolve().parents[1] / 'report.py'))
 report=importlib.util.module_from_spec(spec);spec.loader.exec_module(report)
 
 class Report(unittest.TestCase):
+    def test_completed_outcomes_are_not_presented_as_successful_throughput(self):
+        axes=[MagicMock() for _ in range(3)];plt=MagicMock()
+        plt.subplots.return_value=(MagicMock(),axes)
+        phase={'name':'stress_500','offered_rps':500,'offered_slots':1000,
+               'dispatched':1000,'admission_seconds':2,'completed_rps':100,
+               'statuses':{'200':800,'502':200},'elapsed_seconds':10,
+               'peak_in_flight':500,'max_in_flight':1000,
+               'skipped_concurrency':0,'skipped_scheduler':0}
+        self.assertTrue(report.stress_graph(plt,Path('/unused'),[phase]))
+        series={call.kwargs['label']:call.args[1] for call in axes[0].plot.call_args_list}
+        self.assertEqual(series['All outcomes / time including drain'],[100])
+        self.assertEqual(series['HTTP 200 / time including drain'],[80])
+
+
+    def test_many_stage_labels_remain_short_and_distinguish_repeated_rates(self):
+        phases=[{'name':'experiment / stress_500','offered_rps':500} for _ in range(25)]
+        phases[-1]={'name':'experiment / stress_recovery','offered_rps':10}
+        labels=[report.stress_tick(i,p) for i,p in enumerate(phases)]
+        self.assertEqual(len(set(labels)),25)
+        self.assertTrue(all(max(map(len,label.splitlines()))<=8 for label in labels))
+        self.assertEqual(labels[-1],'P25\nRecovery')
+
+
     def test_aborted_stage_is_never_presented_as_qualified(self):
         self.assertEqual(report.failure_notice({'ledger_verified':True}),'')
         notice=report.failure_notice({'failure_type':'SafetyStop','failure_phase':'stress_1000','failure_reason':'gateway <OOM>'})

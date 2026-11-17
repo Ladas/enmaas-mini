@@ -14,6 +14,7 @@ MEM='100 * sum by(host)(enmaas_host_memory_bytes{state="available"}) / sum by(ho
 DISK='100 * sum by(host)(enmaas_host_disk_bytes{state="available"}) / sum by(host)(enmaas_host_disk_bytes{state="total"})'
 MEAN=f'sum(rate(praxis_http_request_duration_seconds_sum{{{INFERENCE}}}[2m])) / sum(rate(praxis_http_request_duration_seconds_count{{{INFERENCE}}}[2m]))'
 RULES=[
+ ('BenchmarkFailuresHigh','generator','critical','((enmaas_stress_completed - enmaas_stress_successful) / clamp_min(enmaas_stress_completed, 1) > 0.05) and on() (enmaas_stress_completed >= 100) and on() (time() - enmaas_stress_sample_unixtime_seconds < 30)','1m','More than 5% of completed benchmark requests failed','Inspect client errors and HTTP outcomes; in-flight requests are excluded and failures are not automatically gateway faults','benchmark'),
  ('GeneratorConcurrencyLimited','generator','warning','(enmaas_stress_skipped_concurrency / enmaas_stress_offered_slots > 0.01) and on() (time() - enmaas_stress_sample_unixtime_seconds < 30)','15s','Generator concurrency cap skips offered requests','Do not claim gateway capacity; compare active requests with generator cap','benchmark'),
  ('GeneratorSchedulerLimited','generator','warning','(enmaas_stress_skipped_scheduler / enmaas_stress_offered_slots > 0.01) and on() (time() - enmaas_stress_sample_unixtime_seconds < 30)','15s','Generator scheduling misses offered requests','Inspect generator CPU and event-loop delay before increasing offered traffic','benchmark'),
  ('HostCpuHigh','capacity','warning',CPU+' > 85','2m','Host CPU over 85%','Reduce offered load; inspect host CPU','host'),
@@ -49,6 +50,31 @@ def rules():
 
 
 def link(name,target):return {'name':name,'url':BASE+'enmaas-'+target,'targetBlank':False}
+
+def status_logs_link(status):
+    if status not in ('3xx','4xx','5xx'):
+        raise ValueError('Unsupported status class')
+    return {'name':'View '+status+' logs',
+            'url':BASE+'enmaas-logs?var-log_service=%28enmaas-gateway.%2A%7Cpricetag-gateway%29&var-log_status='+status[0]+'%5B0-9%5D%5B0-9%5D'+
+                  '&start=${__from}&end=${__to}&refresh=0s', 'targetBlank':False}
+
+
+def log_filters(document):
+    """Only retained structured status fields are queried; never parse raw bodies."""
+    variables=[]
+    for name,title,default,values in (
+        ('log_service','Service','.+',[('.+','All services'),('(enmaas-gateway.*|pricetag-gateway)','Gateway')]),
+        ('log_status','HTTP status','.*',[('.*','All / unclassified')]+[(str(i)+'[0-9][0-9]',str(i)+'xx') for i in (3,4,5)]),
+    ):
+        variables.append({'kind':'ListVariable','spec':{'name':name,'display':{'name':title},
+            'defaultValue':default,'allowMultiple':False,'allowAllValue':False,
+            'plugin':{'kind':'StaticListVariable','spec':{'values':[{'value':value,'label':label} for value,label in values]}}}})
+    document['spec']['variables']=variables
+    panel=document['spec']['panels']['0']['spec']
+    panel['queries'][0]['spec']['plugin']['spec']['query']='{service_name=~"$log_service"} | http_response_status_code=~"$log_status"'
+    panel['display']['description']='Sanitized events only. HTTP filters require a retained structured status code. An empty filtered result means no matching collected events, not zero gateway errors; compare gateway metrics and sampled traces. Original messages, headers and request bodies are not exposed.'
+    return document
+
 
 def chart(title,query,detail,description='',kind='TimeSeriesChart',instant=False,unit='decimal'):
     if description:
@@ -153,7 +179,7 @@ def benchmark_overview(source):
             'seriesNameFormat':'Dispatched workload equivalent'}}}})
         panels.append((key,panel,12,8))
     for key,title,query,unit,desc in (
-        ('concurrency','Active requests and generator capacity','enmaas_stress_active_requests','decimal','Active generator requests; the configured ceiling is a generator constraint, not gateway capacity.'),
+        ('concurrency','Active requests and generator capacity','(enmaas_stress_dispatched - enmaas_stress_completed)','decimal','Dispatched requests without a terminal outcome, including response validation. Derived from outcome counters so completed tasks waiting for cleanup callbacks are excluded. The configured ceiling is a generator constraint, not gateway capacity.'),
         ('skips','Admissions skipped','enmaas_stress_skipped_concurrency + enmaas_stress_skipped_scheduler','decimal','Per-phase admissions not dispatched because of concurrency or scheduler limits.'),
         ('failures','Completed requests without HTTP 200','enmaas_stress_completed - enmaas_stress_successful','decimal','Per-phase non-success outcomes. Consult the report for status and transport-error breakdown.'),
         ('phase','Load stages','enmaas_benchmark_phase','decimal','One active phase at a time; zero is inactive. Stage changes reset generator phase counters.')):
@@ -161,10 +187,10 @@ def benchmark_overview(source):
         if key=='concurrency':
             panel['spec']['queries'].append({'kind':'TimeSeriesQuery','spec':{'plugin':{'kind':'PrometheusTimeSeriesQuery','spec':{'query':'enmaas_stress_concurrency_limit','seriesNameFormat':'Configured ceiling'}}}})
         panels.append((key,panel,12,7))
-    panels.append(('firing',chart('Firing benchmark alerts','ALERTS{alertstate="firing",category="generator"}','benchmark','Generator warnings only. Operational alerts are in Main monitoring.','Table',True),24,7))
+    panels.append(('firing',chart('Firing benchmark alerts','ALERTS{alertstate="firing",category="generator"}','benchmark','Benchmark admission and client-outcome alerts. Operational service alerts are in Main monitoring.','Table',True),24,7))
     for key,title,query,unit,description in (
-        ('loadcpu','Load versus service CPU — cores','rate(enmaas_container_cpu_seconds_total{component=~"gateway-sso|metering-sso|db|provider"}[2m])','decimal','Left axis: CPU cores per selected host/service/instance. Right axis: achieved generator dispatch rate, averaged from phase start. The mock provider and generator can constrain throughput independently of the gateway.'),
-        ('loadmemory','Load versus service memory','enmaas_container_memory_bytes{component=~"gateway-sso|metering-sso|db|provider"}','bytes','Left axis: container memory per selected host/service/instance, including cache as reported by Podman. Right axis: achieved dispatch rate. Retained memory alone does not establish a leak.'),
+        ('loadcpu','Load versus service CPU — cores','rate(enmaas_container_cpu_seconds_total{component=~"gateway-sso|maas|metering-sso|db|provider"}[2m])','decimal','Left axis: CPU cores per selected host/service/instance. Right axis: achieved generator dispatch rate, averaged from phase start. The mock provider and generator can constrain throughput independently of the gateway.'),
+        ('loadmemory','Load versus service memory','enmaas_container_memory_bytes{component=~"gateway-sso|maas|metering-sso|db|provider"}','bytes','Left axis: container memory per selected host/service/instance, including cache as reported by Podman. Right axis: achieved dispatch rate. Retained memory alone does not establish a leak.'),
         ('loadpool','Load versus database pool waiting','sum(rate(metering_db_pool_wait_seconds_total[2m]))','decimal','Left axis: aggregate connection-pool waiting seconds per second. Concurrent waiters can make this exceed one. Right axis: achieved dispatch rate. This is application pool waiting, not PostgreSQL lock waiting.'),
         ('loadduration','Load versus inference duration',MEAN,'seconds','Left axis: mean duration of completed inference streams, including provider response time. Right axis: achieved dispatch rate. Compare with the configured 10–120 second response schedule; this is not proxy overhead.')
     ):
@@ -212,6 +238,7 @@ def production_overview(source):
                'and on() (time() - max(timestamp(praxis_process_open_fds)) < 90)')
         panel=chart(status+' — '+label,query,'gateway',meaning+' Fleet-wide public responses per second over two minutes. Zero requires observed public counters and fresh gateway telemetry; absent telemetry remains unavailable.',unit='requests/sec')
         panel['spec']['links'].append(link('Logs','logs'))
+        panel['spec']['links'].append(status_logs_link(status))
         panels.append(('public'+status,panel,8,8))
     for key,title,query,unit,description in (
       ('gatewaytraffic','Public throughput — selected response classes',f'sum by(cluster,status_class)(rate(praxis_http_requests_total{{{PUBLIC},status_class=~"$response_class"}}[2m]))','requests/sec','HTTP 200 is included in 2xx alongside other successful status codes. Use Response classes to add redirects or errors. Defaults show 2xx, informational 1xx and unclassified responses. Redirects, client/policy rejections and server errors have separate panels. Fleet-wide public responses only; excludes internal hops.'),
@@ -245,6 +272,21 @@ def production_overview(source):
       ('gatewaylimit','Gateway memory limit','enmaas_container_memory_limit_bytes{component="gateway-sso"}','bytes'),
       ('health','Host telemetry age','time() - enmaas_host_sample_unixtime_seconds{host!=""}','seconds')):
         panels.append((key,chart(title,query,'components' if key!='health' else 'host','Per selected host/instance. No inferred capacity or missing-data zero; telemetry age above 90 seconds is stale.',unit=unit),12,8))
+    panels.append(('controlresources',section('MaaS Standalone and PriceTag Metering — service resources',
+        'CPU is measured in cores; memory and its configured ceiling use MiB/GiB. '
+        'Separate lines retain host and instance identity. A gap is missing observation, not zero use or proof of health. '
+        '[All service resources]('+BASE+'enmaas-components) · [Database and usage processing]('+BASE+'enmaas-accounting)'),24,3))
+    for key,name,component in (('maas','MaaS Standalone','maas'),('metering','PriceTag Metering','metering-sso')):
+        selector='{component="'+component+'"}'
+        cpu=chart(name+' CPU — cores','rate(enmaas_container_cpu_seconds_total'+selector+'[2m])','components',
+            name+' CPU time per second over two minutes, separately per selected host and instance. One busy core is 1. Compare the timeline with request load; CPU alone does not prove API health.',unit='decimal')
+        memory=chart(name+' memory and limit','enmaas_container_memory_bytes'+selector,'components',
+            name+' container memory in MiB/GiB, including cache as reported by Podman. The second line is its configured ceiling. Short spikes or an OOM between samples may not be visible; inspect failure evidence and telemetry gaps.',unit='bytes')
+        memory['spec']['queries'].append({'kind':'TimeSeriesQuery','spec':{'plugin':{'kind':'PrometheusTimeSeriesQuery','spec':{
+            'query':'enmaas_container_memory_limit_bytes'+selector,'seriesNameFormat':'{{host}} / {{replica}} — limit'}}}})
+        for panel in (cpu,memory):
+            panel['spec']['queries'][0]['spec']['plugin']['spec']['seriesNameFormat']='{{host}} / {{replica}} — usage'
+        panels.extend([(key+'cpu',cpu,12,8),(key+'memory',memory,12,8)])
     panels.append(('databasesection',section('Database — selected PostgreSQL source',
         'Database selects the monitored PostgreSQL engine independently of Host. These engine measurements apply to local PostgreSQL or RDS when a collector supplies them. '
         'No source means collection is unavailable, not zero activity. RDS CloudWatch CPU, IOPS, storage latency and credits require a separate integration; they are not Linux host metrics.'),24,3))
@@ -383,7 +425,7 @@ def dashboards():
       ('currenterrors','Gateway server errors',f'100 * (sum(rate(praxis_http_requests_total{{{PUBLIC},status_class="5xx"}}[2m])) or (0 * sum(rate(praxis_http_requests_total{{{PUBLIC}}}[2m])))) / sum(rate(praxis_http_requests_total{{{PUBLIC}}}[2m]))','gateway','5xx responses divided by all public responses over two minutes. Warning 1%, critical 5%. Budget/rate-limit 429 responses are policy decisions, excluded from this numerator. No traffic is undefined.',gatewayfresh,1,5),
       ('currentcomponent','Highest component memory use','max(100 * enmaas_container_memory_bytes / (enmaas_container_memory_limit_bytes > 0))','components','Highest individual container memory usage divided by its own limit; percentages are never summed. Warning 80%, critical 95%. Open Components to identify the service. Container statistics can include cache.',hostfresh,80,95)]
     percentages.extend([
-      ('currentgenerator','Generator concurrency','100 * enmaas_stress_active_requests / enmaas_stress_concurrency_limit','monitoring','Async stress runner only: active requests divided by its configured cap. Warning 80%, critical 95%. This is a generator ceiling, not gateway capacity.','time() - max(enmaas_stress_sample_unixtime_seconds) < 30',80,95),
+      ('currentgenerator','Generator concurrency','100 * (enmaas_stress_dispatched - enmaas_stress_completed) / enmaas_stress_concurrency_limit','monitoring','Async stress runner only: dispatched minus completed outcomes, divided by its configured cap. Warning 80%, critical 95%. This is a generator ceiling, not gateway capacity.','time() - max(enmaas_stress_sample_unixtime_seconds) < 30',80,95),
       ('currentgeneratorskips','Generator skipped admissions','100 * (enmaas_stress_skipped_concurrency + enmaas_stress_skipped_scheduler) / enmaas_stress_offered_slots','monitoring','Async stress runner only: offered admissions skipped because of concurrency or scheduler limits, as a percentage of this phase’s offered slots. Warning 1%, critical 10%. These requests never reached the gateway.','time() - max(enmaas_stress_sample_unixtime_seconds) < 30',1,10)])
     for key,title,query,detail,description,freshness,warning,critical in percentages:
         panels.append((key,current(title,query,detail,description,'percent',freshness,(warning,critical)),6,5))
@@ -500,6 +542,14 @@ def all_dashboards():
     """Combine maintained templates with generated dashboards without workspace writes."""
     documents={path.name:json.loads(path.read_text()) for path in (HERE/'perses').glob('*-dashboard.json')}
     documents.update(dashboards())
+    for document in documents.values():
+        for panel in document['spec']['panels'].values():
+            plugin=panel['spec'].get('plugin',{})
+            if plugin.get('kind')=='Markdown':
+                plugin['spec']['text']=plugin['spec']['text'].replace('Accounting / DB','Database & usage metering')
+    documents['gateway-dashboard.json']['spec']['panels']['1']['spec']['display']['description'] += ' Fast failures can lower this mean; compare successful throughput and response classes before judging latency.'
+    documents['logs-dashboard.json']=log_filters(documents['logs-dashboard.json'])
+    documents['gateway-dashboard.json']['spec']['panels']['0']['spec'].setdefault('links',[]).append(status_logs_link('5xx'))
     return documents
 
 

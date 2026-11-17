@@ -7,7 +7,7 @@ FIELDS=('offered_slots','dispatched','skipped_concurrency','skipped_scheduler',
 
 
 def payload(snapshot, concurrency, now=None):
-    if type(concurrency) is not int or not 1<=concurrency<=20000:raise ValueError('Invalid concurrency limit')
+    if type(concurrency) is not int or not 1<=concurrency<=40000:raise ValueError('Invalid concurrency limit')
     timestamp=time.time_ns() if now is None else now
     metrics=[]
     for name in FIELDS:

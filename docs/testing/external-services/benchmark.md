@@ -117,10 +117,11 @@ capacity qualification: budget rejection is an intentional policy outcome.
 
 ### Capacity above 10,000 concurrent requests
 
-The async local runner supports `--profile extended --concurrency 20000`:
+The async local runner supports `--profile extended --concurrency 40000`:
 100 → 150 → 200 → 250 requests/second, then 10 requests/second recovery.
 Use `--duration 600` for ten-minute admission stages, followed by draining requests.
-The mock backend also supports 20,000 concurrent requests. The default concurrency
+The isolated mock backend permits a 40,000-request concurrency ceiling. This is
+a configured bound, not measured sustainable capacity. The generator default
 remains 5,000; the higher ceiling is an explicit experiment setting.
 
 Responses stream for 10–120 seconds. At the approximate 65-second mean, sustained
@@ -128,3 +129,47 @@ Responses stream for 10–120 seconds. At the approximate 65-second mean, sustai
 These are estimates, not capacity claims. Generator percentage means active
 requests divided by its configured ceiling; host CPU and memory are separate.
 Resource safety checks and the stop-on-failure/recovery behavior remain enabled.
+
+For a targeted probe, add `--min-rate 250 --max-rate 250` to the extended
+profile. This retains the ten-requests/second recovery stage. Raising concurrency
+does not raise offered requests/second or the gateway rate limit. Check
+`skipped_concurrency` and `skipped_scheduler` separately: zero concurrency skips
+means the configured cap did not restrict admission. The runner requires a process
+file-descriptor limit of at least concurrency plus 256; memory and disk guards stay
+active. Rebuild the isolated mock image after changing its capacity bound.
+
+The isolated mock also exposes authenticated, counts-only diagnostics at
+`/__enmaas/capacity` on its internal listener: configured maximum, current and peak
+active requests, and capacity rejections. This is a test-backend endpoint, not a
+new public gateway route. Use it to distinguish mock-backend rejection from
+gateway failure; a higher generator ceiling alone cannot establish the cause.
+
+`--profile full` includes 10 → 50 → 100 → 150 → 200 → 250 requests/second,
+then recovery. `--gateway-memory-mib 16384` is an explicit local experiment
+allocation and is restored afterward. Record allocation changes alongside the
+results; they must not be mistaken for application-only performance improvements.
+
+For hosts with sufficient spare resources, `--profile higher` offers
+500 → 750 → 1,000 requests/second, then recovery. Start with
+`--min-rate 500 --max-rate 500` to measure one ten-minute stage before escalating.
+The 40,000-request concurrency cap still applies: at a mean response duration of
+65 seconds, 500 requests/second requires roughly 32,500 concurrent requests;
+750 requests/second would exceed that cap. Skipped admissions identify a generator
+limit, not a gateway failure. Inspect achieved throughput before increasing load.
+
+Multiple generator processes sharing one source address and destination can still
+exhaust the same ephemeral TCP-port pool. A connection error such as
+`EADDRNOTAVAIL` in the client is a generator/network constraint, not an HTTP
+rejection from the gateway. The same error on a gateway-to-listener connection
+can instead produce an HTTP 502. Check which process and connection failed before
+attributing the result to gateway capacity. More workers alone do not provide more source addresses; use
+separate generator hosts or explicitly qualified network/source-address isolation
+for larger experiments. Different source addresses within the application network
+namespace can still interfere with its internal connections. Prefer separate
+generator hosts or network namespaces, and record the forwarding path used. The
+current CLI does not configure that isolation.
+
+`--gateway-memory-mib 32768` is available for an explicitly sized local experiment;
+it does not increase VM RAM. Keep headroom for the database, mock backend and other
+services, and account separately for the host-side generator. Record any limit
+change when comparing runs. Resource safety checks and cleanup remain enabled.

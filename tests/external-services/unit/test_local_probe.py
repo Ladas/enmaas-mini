@@ -22,4 +22,15 @@ class Probe(unittest.TestCase):
                 self.assertEqual(run.call_count,3)
                 self.assertNotIn('private diagnostic',str(error.exception))
 
+class PrivateFailureMetadata(unittest.TestCase):
+    def test_safe_operation_and_error_kind_without_command_or_output(self):
+        for command,operation in ((['podman','stats','private-name'],'container-stats'),
+                                  (['podman','machine','ssh','private-command'],'vm-ssh'),
+                                  (['unknown','private-value'],'other')):
+            with patch.object(local_probe.subprocess,'run',side_effect=subprocess.TimeoutExpired(command,5)),patch.object(local_probe.time,'sleep'):
+                with self.assertRaises(local_probe.ProbeError) as caught:local_probe.read(command)
+            self.assertEqual(caught.exception.operation,operation)
+            self.assertEqual(caught.exception.kind,'timeout')
+            self.assertNotIn('private',str(caught.exception))
+
 if __name__=='__main__':unittest.main()

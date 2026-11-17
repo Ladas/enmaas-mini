@@ -59,6 +59,19 @@ def suite():
           sample('enmaas_stress_offered_slots','100+0x40'),
           sample('enmaas_stress_sample_unixtime_seconds','0+15x40')],
           [check(name,'2m',True),check(name,'6m',False)])
+    for description,completed,successful,fresh,firing in (
+        ('failed terminal outcomes','1000+0x40','800+0x40',True,True),
+        ('healthy terminal outcomes','1000+0x40','1000+0x40',True,False),
+        ('too few outcomes','50+0x40','0+0x40',True,False),
+        ('stale failed outcomes','1000+0x40','800+0x40',False,False),
+        ('recovery resets outcomes','1000+0x16 100+0x24','800+0x16 100+0x24',True,False),
+    ):
+        case('benchmark reliability: '+description,[
+          sample('enmaas_stress_completed',completed),
+          sample('enmaas_stress_successful',successful),
+          sample('enmaas_stress_active_requests','10000+0x40'),
+          sample('enmaas_stress_sample_unixtime_seconds','0+15x40' if fresh else '0+0x40')],
+          [check('BenchmarkFailuresHigh','6m',firing)])
     positive=[
       ('HostCpuHigh',[sample('enmaas_host_cpu_seconds_total{state="user"}','0+90x40'),sample('enmaas_host_cpu_seconds_total{state="idle"}','0+5x40')],{}),
       ('HostDiskLow',[sample('enmaas_host_disk_bytes{state="total"}','100+0x40'),sample('enmaas_host_disk_bytes{state="available"}','10+0x40')],{}),
