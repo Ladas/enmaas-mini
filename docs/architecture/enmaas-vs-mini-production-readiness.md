@@ -1,12 +1,14 @@
 # EnMaaS vs enmaas-mini: architecture comparison and production-readiness
 
-> Status: draft architecture comparison to decide the production-grade single-SKU EnMaaS.
+> Status: draft architecture comparison to decide the production-grade single-SKU EnMaaS. Updated per 2026-11-17 DP decisions from Daniele Zonca.
 
 ---
 
 ## Summary
 
 Existing EnMaaS (`EnMaaS-opps`, internal) runs in OpenShift as two namespaces (`enmaas`, `enmaas-monitoring`) with redundant deployments, ingress routes, cert-manager, managed databases, and full observability. `enmaas-mini` (`periwinkle`) collapses the same request path into one RHEL host with rootless Podman Quadlets and a bundled PostgreSQL container, shippable as a bootc VM appliance. The dependency reduction is real and is the correct direction. The remaining gap is that mini replaces many replicas with one of each and calls that a deployment — a topology change, not just a footprint change — and silently moves every availability, durability, and observability property into the "later" bucket. This document maps the building blocks, their requirements, and what production grade must mean before we lock the SKU.
+
+Locked for DP per review: RHEL delivery is an **image SKU** (not RPM/COPR), OpenShift delivery is a **Helm chart** (not an operator), the database must be a Red Hat Hardened `postgresql-17` or `postgresql-18` image, the UI must move to Patternfly, and a distributable CLI binary (`enmaas-cli` / `praxis-cli`, litellm-style) is a required deliverable.
 
 ---
 
@@ -82,11 +84,12 @@ One RHEL host, no cluster:
 | **Edge / routing** | Same Praxis auth/model/metering pipeline | `docs/testing/pricetag.md:5` only `8443` public; Praxis generates unified chains `scripts/pricetag/prepare.py` / `scripts/common/unified_config.py`; validated by `bootc/systemd/` |
 | **Gateway** | Single container, generated config | `bootc/README.md:5` `praxis` image `RHEL 9 bootc`, `configs/all-in-one/` + `configs/pricetag/`; `docs/quickstarts/remote-gateway/README.md:14` rootless `praxis-svc`, Quadlets |
 | **Key service** | `maas-api` standalone | `maas-api/README.md:14` `MAAS_DEPLOYMENT_PROFILE=enmaas`, `DATABASE_URL`/`DB_CONNECTION_URL`, plain HTTP metrics, no CRDs |
-| **Metering** | PriceTag fork, published images | `docs/quickstarts/remote-gateway-pricetag/images.md:5` `quay.io/redhat-et/secure-single-server-*` pinned digests; `docs/testing/pricetag.md:27` 90-day key TTL, 10B safety gate, 15s quota cache |
-| **Data** | One local Postgres | Default 1 container 2 DBs; `--maas-database-url-file` / `--metering-database-url-file` for two external DBs (both required together) |
+| **Metering** | PriceTag fork, published images | `docs/quickstarts/remote-gateway-pricetag/images.md:5` `quay.io/redhat-et/secure-single-server-*` pinned digests; `docs/testing/pricetag.md:27` 90-day key TTL, 10B safety gate, 15s quota cache; UI must migrate to Patternfly per DP decision |
+| **Data** | One local Postgres (hardened) | Default 1 container 2 DBs backed by a Red Hat Hardened `postgresql-17` or `postgresql-18` image (`catalog.redhat.com:rhel10/postgresql-17` / `postgresql-18`; confirm with `lburgazzoli` for the RHOAI-aligned tag); `--maas-database-url-file` / `--metering-database-url-file` for two external DBs (both required together) |
 | **Security** | Private CA, Podman secrets, loopback admin | `docs/testing/pricetag.md:53` `M2M_SHARED_SECRET`, `pricing` secrets, trusted-peer loopback; `docs/quickstarts/remote-gateway/README.md:32` `praxis-svc` locked, root-owned policy |
 | **Observability** | None bundled | `docs/quickstarts/remote-gateway-pricetag/architecture.md:235` "Replication, backup and recovery still require explicit configuration" |
-| **Ops** | Workstation-driven install | `scripts/pricetag/install --hostname $GATEWAY_HOST`, `scripts/pricetag/maas-key`, `scripts/pricetag/user`, `bootc switch IMAGE:TAG` |
+| **Ops** | Workstation-driven install → CLI product | `scripts/pricetag/install --hostname $GATEWAY_HOST`, `scripts/pricetag/maas-key`, `scripts/pricetag/user`, `bootc switch IMAGE:TAG`; DP requires a distributable binary (`enmaas-cli` / `praxis-cli`) — see litellm proxy (`docs.litellm.ai/docs/proxy/docker_quick_start`, `proxy/deploy/helm`) — that covers `config validate`, `install`, `model add/list`, `user create/keys`, `upgrade/rollback`, `backup` |
+| **CLI** | First-class DP deliverable | Binary `enmaas-cli` (or `praxis-cli`) shipped alongside the image/Helm chart; wraps the current shell helpers with a stable API/UX modeled on `litellm --config /path/to/config.yaml` |
 
 ### 1.3. Visual comparison (mermaid)
 
@@ -127,15 +130,15 @@ flowchart TB
 
 | Dimension | Current EnMaaS | mini today | Change |
 |-----------|----------------|------------|--------|
-| **Platform** | OpenShift / ROSA, `oc`, Router, cert-manager operator, CNPG or RDS access, `make render` | RHEL 9.6 x86_64 bootc-managed host, `podman`, `systemd`, `bootc` | Removes cluster control plane; moves burden to host |
+| **Platform** | OpenShift / ROSA, `oc`, Router, cert-manager operator, CNPG or RDS access, `make render` | RHEL 9.6 x86_64 bootc-managed host, `podman`, `systemd`, `bootc`; DP confirmed: **image SKU** (no RPM/COPR) for RHEL and **Helm chart** (`odh-gitops`-style; `litellm` Helm precedent) for OpenShift | Removes cluster control plane; moves burden to host; operator is not the plan |
 | **Compute** | Dedicated cluster nodes, Praxis `2CPU/4Gi` per pod × 8, similar for API/metering/exporters | 8 vCPU / 32 GiB / 150 GiB tested (`docs/quickstarts/remote-gateway-pricetag/README.md:15`); no GPU unless vLLM | ~80% smaller footprint |
-| **Data** | Managed DB (RDS) + read replica + S3 backup bucket + IAM role, `gp3-csi` | Local Postgres container (or two user-provided external DBs) | Removes external managed data tier |
+| **Data** | Managed DB (RDS) + read replica + S3 backup bucket + IAM role, `gp3-csi` | Hardened local Postgres 17/18 container (`catalog.redhat.com:rhel10/postgresql-17` / `postgresql-18`) or two user-provided external DBs | Removes external managed data tier; hardened image is the DP requirement |
 | **Network** | Router + 28 path Routes, `NetworkPolicy` default-deny, 443 egress to providers, 5432 to RDS, 6443/443 to K8s API | Only `8443` public; host loopback admin; 443 egress to providers | Simpler, loses per-policy isolation |
 | **TLS** | cert-manager + Let's Encrypt ECDSA, auto-renew 720h before 2160h expiry, `externalCertificate: enmaas-public-tls` | Private CA, server cert, manual `GATEWAY_HOST` rotation | No auto-renew; CA distribution |
 | **Identity** | MaaS finite keys + PriceTag OIDC-capable dashboards, role checks, team scopes | Finite keys only, no OIDC, revoke ≠ session logout | Reduced IdP matrix |
 | **Observability** | Managed Prometheus/Grafana/AM + exporters + SLO dashboards + synthetics | None | Must be rebuilt or externalized |
-| **Ops** | `make diff/render/print`, AppSRE saas, SOPs, backup/restore runbooks | `scripts/pricetag/install`, Quadlets, `bootc switch`, `scripts/pricetag/api|manage` | Fresh-host install only |
-| **Supply chain** | Digest-pinned images, internal registry, Quay mirrors, SBOM TBD | Digest-pinned published images + bootc builds | Needs signing/release process |
+| **Ops** | `make diff/render/print`, AppSRE saas, SOPs, backup/restore runbooks | CLI product: `enmaas-cli`/`praxis-cli` wrapping `install`, `config validate`, `model add/list`, `user/keys`, `upgrade/rollback`, `backup`; Quadlets + `bootc switch` underneath | Fresh-host install only today; CLI is the DP deliverable |
+| **Supply chain** | Digest-pinned images, internal registry, Quay mirrors, SBOM TBD | Digest-pinned published images + bootc builds; DP: keep `quay.io/redhat-et` / `quay.io/modden` from `clusters/prod/params/enmaas.params`, no move to `odh` org | Needs signing/release process |
 | **Air-gap** | Not air-gap ready | Not air-gap ready; bootc pulls on first boot | Needs mirror/bundle for either |
 
 ### Eliminated dependencies (mini advantage)
@@ -171,18 +174,23 @@ Production grade is a contract across eight dimensions. A plausible v1 target is
 
 ---
 
-## 4. Big architecture decisions to lock before implementation
+## 4. Big architecture decisions — status after DP review
 
-1. **SKU form** — bootc VM appliance (recommended), container bundle, or both? Bootc VM as the product with containers inside gives a single artifact and preserved layer pinning.
-2. **HA boundary** — single node with optional external DB vs. deferred multi-node. Drives the entire data tier.
-3. **Database** — bundled Postgres vs. external managed DB. Bundled is simpler; external is the only credible HA path.
-4. **TLS** — private CA only, customer-provided cert, or ACME/Let's Encrypt. Production usually needs a real cert story.
-5. **Identity** — local MaaS keys only vs. OIDC/SSO. Existing EnMaaS is OIDC-capable; mini has no IdP.
-6. **Observability** — bundle a minimal Prometheus/Grafana/Alertmanager or export to customer monitoring. Bundling closes the largest production gap.
-7. **Upgrade model** — in-place `bootc switch`, blue/green VM, or package update. Current repo is fresh-host only.
-8. **Scale target** — users, rps, tokens/day, DB size. Without targets, performance and scale are untestable.
-9. **Air-gap** — internal registry mirror, preloaded images, offline price snapshot, internal CA. Bootc pulls on first boot — not air-gap native.
-10. **Support boundary** — what is Red Hat-supported vs. experimental (`README.md:11` "experimental demonstration"), lifecycle, and fix cadence.
+| # | Decision | Status | Choice |
+|---|----------|--------|--------|
+| 1 | **SKU form** | **Locked** | RHEL delivery is an **image SKU** (not RPM/COPR); OpenShift delivery is a **Helm chart** (`odh-gitops`/`litellm` Helm precedent, not an operator) |
+| 2 | **Project home / images** | **Locked** | Keep `redhat-et` and `quay.io/modden` / `quay.io/redhat-et` for DP; no move to `opendatahub` org or `praxis` image org yet; metering migration to `praxis` is later |
+| 3 | **Database** | **Locked** | Use Red Hat Hardened `postgresql-17` or `postgresql-18` (`catalog.redhat.com:rhel10/postgresql-17` / `postgresql-18`); confirm tag with `lburgazzoli` for the RHOAI-aligned image |
+| 4 | **CLI** | **Required** | Ship a distributable binary (`enmaas-cli` or `praxis-cli`) modeled on `litellm` proxy (`docs.litellm.ai/docs/proxy/docker_quick_start`) covering `config validate`, `install`, `model add/list`, `user create/keys`, `upgrade/rollback`, `backup` |
+| 5 | **UI** | **Locked** | Migrate to Patternfly |
+| 6 | **HA boundary** | Open | Single node with optional external DB vs. deferred multi-node. Drives the entire data tier |
+| 7 | **TLS** | Open | Private CA only, customer-provided cert, or ACME/Let's Encrypt. Production usually needs a real cert story |
+| 8 | **Identity** | Open | Local MaaS keys only vs. OIDC/SSO. Existing EnMaaS is OIDC-capable; mini has no IdP |
+| 9 | **Observability** | Open | Bundle a minimal Prometheus/Grafana/Alertmanager or export to customer monitoring. Bundling closes the largest production gap |
+| 10 | **Upgrade model** | Open | In-place `bootc switch`, blue/green VM, or package update. Current repo is fresh-host only |
+| 11 | **Scale target** | Open | Users, rps, tokens/day, DB size. Without targets, performance and scale are untestable |
+| 12 | **Air-gap** | Open | Internal registry mirror, preloaded images, offline price snapshot, internal CA. Bootc pulls on first boot — not air-gap native |
+| 13 | **Support boundary** | Open | What is Red Hat-supported vs. experimental (`README.md:11` "experimental demonstration"), lifecycle, and fix cadence |
 
 ---
 
@@ -215,4 +223,4 @@ Images are `linux/amd64` (`docs/quickstarts/remote-gateway-pricetag/images.md:38
 
 ---
 
-*Sources: `EnMaaS-opps/README.md`, `clusters/prod/params/enmaas.params`, `base/projects/enmaas/*.template.yaml`, `rendered/prod/enmaas.yaml`, `docs/architecture/`, periwinkle `bootc/README.md`, `docs/quickstarts/*`, `docs/testing/pricetag.md`, `maas-api/README.md`, `docs/quickstarts/remote-gateway-pricetag/images.md`.*
+*Sources: `EnMaaS-opps/README.md`, `clusters/prod/params/enmaas.params`, `base/projects/enmaas/*.template.yaml`, `rendered/prod/enmaas.yaml`, periwinkle `bootc/README.md`, `docs/quickstarts/*`, `docs/testing/pricetag.md`, `maas-api/README.md`, `docs/quickstarts/remote-gateway-pricetag/images.md`; DP decisions: 2026-11-17 feedback (Daniele Zonca) — image SKU for RHEL, Helm for OpenShift, hardened postgres `catalog.redhat.com:rhel10/postgresql-17`|`18`, Patternfly UI, `enmaas-cli`/`praxis-cli` litellm-style, `BerriAI/litellm` proxy and `odh-gitops` Helm as precedents.*
