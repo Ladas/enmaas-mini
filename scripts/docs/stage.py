@@ -127,14 +127,17 @@ def stage_docs(destination: Path = STAGE) -> int:
             staged_paths.add(relative_key)
             copied += 1
 
+    static_staged: set[str] = set()
     for source in static_pages():
         target = destination / source.relative_to(ROOT)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
+        static_staged.add(source.relative_to(ROOT).as_posix())
 
     nav_paths = navigation_paths()
-    if not nav_paths.issubset(staged_paths):
-        missing_from_stage = sorted(nav_paths - staged_paths)
+    all_staged = staged_paths | static_staged
+    if not nav_paths.issubset(all_staged):
+        missing_from_stage = sorted(nav_paths - all_staged)
         raise SystemExit(
             "nav entries not staged: " + ", ".join(missing_from_stage)
         )

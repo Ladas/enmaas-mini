@@ -223,4 +223,6 @@ Images are `linux/amd64` (`docs/quickstarts/remote-gateway-pricetag/images.md:38
 
 ---
 
+> **Interactive companion:** [EnMaaS Mini flow visualizer](enmaas-mini-flow.html) — the same Praxis filter chain on one RHEL host, with hardened Postgres and the DP-locked SKU. Compare with Noy's [EnMaaS (ROSA) flow](https://noyitz.github.io/ai-gateway-docs/enmaas-flow.html).
+
 *Sources: `EnMaaS-opps/README.md`, `clusters/prod/params/enmaas.params`, `base/projects/enmaas/*.template.yaml`, `rendered/prod/enmaas.yaml`, periwinkle `bootc/README.md`, `docs/quickstarts/*`, `docs/testing/pricetag.md`, `maas-api/README.md`, `docs/quickstarts/remote-gateway-pricetag/images.md`; DP decisions: 2026-11-17 feedback (Daniele Zonca) — image SKU for RHEL, Helm for OpenShift, hardened postgres `catalog.redhat.com:rhel10/postgresql-17`|`18`, Patternfly UI, `enmaas-cli`/`praxis-cli` litellm-style, `BerriAI/litellm` proxy and `odh-gitops` Helm as precedents.*

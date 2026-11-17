@@ -49,6 +49,8 @@ nav:
   - Start here:
       - Introduction: docs/README.md
       - Architecture overview: docs/quickstarts/architecture-walkthrough/README.md
+      - EnMaaS vs Mini (production-readiness): docs/architecture/enmaas-vs-mini-production-readiness.md
+      - EnMaaS Mini flow visualizer: docs/architecture/enmaas-mini-flow.html
   - Deployment:
       - Deployment methods: docs/deployment-methods.md
       - Common gateway configuration:
