@@ -44,6 +44,13 @@ Other revisions need their own login, authorization and logout checks.
    --oidc-config /root/gateway-oidc.json
    ```
 
+The tested PriceTag revision expects the immutable issuer UUID in the `rhatUUID`
+claim, with the profile/email claims it consumes. The test Keycloak realm maps its
+internal user ID to `rhatUUID`; configure the equivalent mapping for another
+issuer. Email or a display name is not an identity substitute. Provision that
+same UUID in PriceTag before login. Recreating an issuer requires deliberate
+identity reconciliation, not matching old accounts by email.
+
 Only GET `/oauth/login` and GET `/oauth/callback` are added to the public route
 allowlist. PriceTag validates OIDC and owns the browser session; development,
 test-login and claims-debug modes stay disabled. Inference continues to use MaaS
