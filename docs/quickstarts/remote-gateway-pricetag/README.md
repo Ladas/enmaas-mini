@@ -83,6 +83,7 @@ whose personal-key page is **My keys** (`/management`). The candidate uses
 | --- | --- |
 | `--no-sample-users` | Create admin only; onboard users in Administration → Users. |
 | `--monthly-usd 10` | Set the default per-user monthly allowance. |
+| `--non-interactive --yes` | Disable prompts, including when SSH allocates a terminal; see [headless installation](headless.md). |
 | `--image-mode source` | Build application images; see [image options](images.md). |
 | `--mode mock` | Use synthetic providers for [benchmarks](../../testing/pricetag-perf.md). |
 | `--maas-database-url-file PATH` | Use an existing external MaaS database; see [external PostgreSQL](external-database.md). |

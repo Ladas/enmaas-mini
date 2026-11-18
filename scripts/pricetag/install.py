@@ -202,6 +202,8 @@ def parse_args(argv=None):
     p.add_argument('--sample-users', action=argparse.BooleanOptionalAction, default=None,
                    help='create Alice and Bob in addition to the required administrator')
     p.add_argument('--yes', action='store_true', help='skip final confirmation, not missing setup prompts')
+    p.add_argument('--non-interactive', action='store_true',
+                   help='never prompt; require complete options and protected credential files')
     p.add_argument('--plan', action='store_true', help='print stages without credentials, discovery or host changes')
     p.add_argument('--image-mode', choices=('source', 'published'), help='build source or pull digest-pinned images')
     p.add_argument('--maas-image', help='published MaaS image, including @sha256 digest')
@@ -213,7 +215,9 @@ def parse_args(argv=None):
     metering_source.add_argument('--metering-revision', help='full PriceTag source SHA to build or verify')
     metering_source.add_argument('--metering-branch', help='source mode: branch in the PriceTag source repository')
     args = p.parse_args(argv)
-    interactive = sys.stdin.isatty() and not args.plan
+    interactive = sys.stdin.isatty() and not args.plan and not args.non_interactive
+    if args.non_interactive and not args.plan and not args.yes:
+        p.error('--non-interactive requires --yes')
     if not args.hostname and interactive:
         args.hostname = input('Gateway public IPv4 or DNS name: ').strip()
     if not args.hostname or not valid_hostname(args.hostname):
@@ -268,7 +272,7 @@ def parse_args(argv=None):
         p.error('--external-api requires --provider external')
     if args.pricetag_key_file and not (args.pricetag_messages_url or args.pricetag_openai_url):
         p.error('--pricetag-key-file requires a PriceTag URL')
-    if not args.plan and not sys.stdin.isatty() and args.mode == 'real':
+    if not args.plan and (args.non_interactive or not sys.stdin.isatty()) and args.mode == 'real':
         if not args.yes:
             p.error('noninteractive installation requires --yes')
         if any(not getattr(args, provider + '_key_file') for provider in args.provider):
