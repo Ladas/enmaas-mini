@@ -200,7 +200,25 @@ def benchmark_overview(source):
         panel['spec']['plugin']['spec']['querySettings']=[{'queryIndex':1,'format':{'unit':'requests/sec','decimalPlaces':1},'lineStyle':'dashed'}]
         panel['spec']['plugin']['spec']['legend']['values']=[]
         panels.append((key,panel,24,8))
-    return resource_selectors(dashboard('benchmark','enMAAS — benchmark results',panels))
+    panels.append(('mockintro',section('Mock provider performance',
+        'The mock backend consumes CPU and memory independently of Praxis. Compare its resource use with the gateway before attributing failures to gateway capacity. '
+        'The configured response schedule is not measured backend latency; completed-stream duration includes the entire request path. '
+        'Missing resource samples do not prove downtime or OOM: confirm those using container state and kernel evidence in the run report.'),24,3))
+    panels.append(('mockcpu',chart('Mock provider CPU — cores',
+        'rate(enmaas_container_cpu_seconds_total{component="provider"}[2m])','benchmark',
+        'CPU cores consumed by the mock provider per host and instance. One core is one fully occupied logical CPU; this is not a percentage or gateway CPU.',unit='decimal'),12,8))
+    memory=chart('Mock provider memory and limit',
+        'enmaas_container_memory_bytes{component="provider"}','benchmark',
+        'Container memory, including cache reported by Podman, against its configured ceiling. A high value indicates mock-backend pressure, not gateway pressure. Gaps are missing samples, not zero usage.',unit='bytes')
+    memory['spec']['queries'][0]['spec']['plugin']['spec']['seriesNameFormat']='{{host}} / {{replica}} — memory'
+    memory['spec']['queries'].append({'kind':'TimeSeriesQuery','spec':{'plugin':{'kind':'PrometheusTimeSeriesQuery','spec':{
+        'query':'enmaas_container_memory_limit_bytes{component="provider"}','seriesNameFormat':'{{host}} / {{replica}} — limit'}}}})
+    memory['spec']['plugin']['spec']['querySettings']=[{'queryIndex':1,'lineStyle':'dashed'}]
+    panels.append(('mockmemory',memory,12,8))
+    document=resource_selectors(dashboard('benchmark','enMAAS — benchmark results',panels))
+    for key in ('mockcpu','mockmemory'):
+        document['spec']['panels'][key]['spec']['plugin']['spec']['legend']={'mode':'list','position':'bottom','values':[]}
+    return document
 
 
 def production_overview(source):

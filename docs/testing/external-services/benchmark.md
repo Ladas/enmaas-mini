@@ -95,6 +95,26 @@ The gateway rate policy remains at 1,000 requests/s, so expected policy rejectio
 
 The default `decade` profile retains the 10× offered-rate staircase. Use measured results, including missed admissions and exact accounting reconciliation, when comparing profiles.
 
+### Read the capacity dashboard
+
+The **Benchmark results → Mock provider performance** section separates backend
+CPU cores and memory from gateway resource use. The memory chart includes the
+mock container's configured limit. A mock OOM is a backend constraint, not a
+measured gateway capacity limit; confirm OOMs with kernel/container evidence.
+Missing metric samples alone do not prove a crash.
+
+People and bot charts are alternative workload assumptions: one request/minute
+per person or ten requests/minute per bot. Do not add those estimates or treat
+them as tested seat counts. For a mixed team, calculate
+`(people × requests/person/minute + bots × requests/bot/minute) / 60`.
+
+At steady state, concurrent requests are approximately achieved requests/second
+multiplied by mean end-to-end duration. The mock's configured 10–120-second
+schedule is not measured model execution time. Client first-byte timing is not
+necessarily first-token timing, and subtracting unrelated client, gateway or
+backend averages does not isolate gateway overhead. Inspect failures alongside
+latency: fast failures can lower the mean while service quality worsens.
+
 ### Varied users and budget exhaustion
 
 Use `--scenario budgets` with `local-benchmark.py` (local Podman) or

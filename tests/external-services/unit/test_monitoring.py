@@ -213,7 +213,7 @@ class Monitoring(unittest.TestCase):
 
     def test_benchmark_is_concise_and_explicit_about_phase_scope(self):
         panels=monitor.dashboards()['benchmark-dashboard.json']['spec']['panels']
-        self.assertLessEqual(len(panels),19)
+        self.assertLessEqual(len(panels),22)
         for key in ('rates','concurrency','skips','failures','phase','firing'):
             self.assertIn(key,panels)
         self.assertNotIn('estimatedpeople',panels)
@@ -225,6 +225,22 @@ class Monitoring(unittest.TestCase):
             spec=panels[key]['spec']
             self.assertEqual(spec['plugin']['spec']['format']['unit'],'percent')
             self.assertIn('sample_unixtime_seconds',spec['queries'][0]['spec']['plugin']['spec']['query'])
+
+    def test_mock_resources_are_separate_and_do_not_claim_backend_latency(self):
+        panels=monitor.dashboards()['benchmark-dashboard.json']['spec']['panels']
+        self.assertIn('mockintro',panels)
+        for key in ('mockcpu','mockmemory'):
+            self.assertEqual(panels[key]['spec']['plugin']['spec']['legend']['position'],'bottom')
+            queries=panels[key]['spec']['queries']
+            for query in queries:
+                expression=query['spec']['plugin']['spec']['query']
+                self.assertIn('component="provider"',expression)
+                self.assertIn('host=~"$host"',expression)
+                self.assertNotIn('or vector(0)',expression)
+        memory=panels['mockmemory']['spec']
+        self.assertEqual(memory['plugin']['spec']['yAxis']['format']['unit'],'bytes')
+        self.assertIn('memory_limit_bytes',memory['queries'][1]['spec']['plugin']['spec']['query'])
+        self.assertIn('not measured backend latency',panels['mockintro']['spec']['plugin']['spec']['text'])
 
     def test_panel_titles_are_unique_for_accessible_navigation(self):
         for document in monitor.dashboards().values():
