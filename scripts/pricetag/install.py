@@ -193,6 +193,8 @@ def parse_args(argv=None):
     p.add_argument('--pricetag-messages-url', help=argparse.SUPPRESS)
     p.add_argument('--pricetag-openai-url', help=argparse.SUPPRESS)
     p.add_argument('--monthly-usd', type=int, default=5, help='default per-user monthly USD allowance; default 5')
+    p.add_argument('--tls-bundle', type=Path, help='pre-issued server.pem, server.key and ca.pem')
+    p.add_argument('--oidc-config', type=Path, help='private JSON file for external OIDC login')
     p.add_argument('--maas-database-url-file', type=Path,
                    help='private URL file for the existing external maas database')
     p.add_argument('--metering-database-url-file', type=Path,
@@ -431,6 +433,14 @@ def install(args):
                                             args.external_database_ca_file)
         except (OSError, ValueError) as error:
             raise ValueError(str(error)) from None
+    if args.oidc_config is not None:
+        if args.metering_revision == 'ce9c6c51b8dff178637003945b517255c54fc853':
+            raise ValueError('This metering revision has no OIDC handler; select the tested source-build candidate')
+        from oidc_config import load as load_oidc
+        load_oidc(args.oidc_config, f'https://{args.hostname}:8443')
+    if args.tls_bundle is not None:
+        from tls_bundle import validate as validate_tls_bundle
+        validate_tls_bundle(args.tls_bundle, args.hostname)
     preflight(args.mode)
     helper = provider_module()
     stage(1, 'Validate provider setup')
@@ -472,6 +482,10 @@ def install(args):
                     '--metering-database-url-file', args.metering_database_url_file]
         if args.external_database_ca_file is not None:
             command += ['--external-database-ca-file', args.external_database_ca_file]
+    if args.oidc_config is not None:
+        command += ['--oidc-config', args.oidc_config]
+    if args.tls_bundle is not None:
+        command += ['--tls-bundle', args.tls_bundle]
     if not args.sample_users:
         command += ['--no-sample-users']
     if args.mode == 'mock':
