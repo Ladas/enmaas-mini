@@ -74,6 +74,16 @@ nav:
           - Bootc image deployment: bootc/VLLM.md
       - Remote gateway with PriceTag:
           - Guided installation: docs/quickstarts/remote-gateway-pricetag/README.md
+          - Deployment choices: docs/quickstarts/remote-gateway-pricetag/deployment-options.md
+          - External services: docs/quickstarts/remote-gateway-pricetag/full-deployment.md
+          - Non-interactive installation: docs/quickstarts/remote-gateway-pricetag/headless.md
+          - OIDC and supplied TLS: docs/quickstarts/remote-gateway-pricetag/external-auth.md
+          - Workload sizing: docs/quickstarts/remote-gateway-pricetag/sizing.md
+          - Mock-to-real provider replacement: docs/testing/external-services/providers.md
+          - Test users and identity lifecycle: docs/testing/external-services/keycloak-users.md
+          - External-service topology: docs/testing/external-services/topology.md
+          - Test certificate bundles: docs/testing/external-services/certificates.md
+          - Deployment security acceptance: docs/testing/external-services/security-acceptance.md
           - Architecture and OpenShift comparison: docs/quickstarts/remote-gateway-pricetag/architecture.md
           - Manual installation: docs/quickstarts/remote-gateway-pricetag/manual.md
           - External PostgreSQL databases: docs/quickstarts/remote-gateway-pricetag/external-database.md
