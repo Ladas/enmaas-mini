@@ -37,6 +37,7 @@ PUBLISHED_TESTING_DOCS = frozenset(
         "docs/testing/pricetag.md",
         "docs/testing/aws-pricetag.md",
         "docs/testing/pricetag-perf.md",
+        "docs/testing/external-services/keycloak-rhel.md",
     )
 )
 EXCLUDED_SOURCES: tuple[Path, ...] = ()

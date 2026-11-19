@@ -99,6 +99,7 @@ nav:
       - Mock provider tests: docs/testing/mocked-provider.md
       - AWS VM runbook: docs/testing/aws.md
       - AWS operations: docs/testing/aws-operations.md
+      - Keycloak test host: docs/testing/external-services/keycloak-rhel.md
 
 extra_css:
   - assets/stylesheets/redhat.css

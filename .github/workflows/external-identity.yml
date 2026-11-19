@@ -1,0 +1,55 @@
+name: External identity contracts and routes
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/external-identity.yml'
+      - 'tests/external-services/**'
+      - 'scripts/common/**'
+      - 'scripts/remote-gateway/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/external-identity.yml'
+      - 'tests/external-services/**'
+      - 'scripts/common/**'
+      - 'scripts/remote-gateway/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: external-identity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  issuer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman openssl shellcheck
+      - name: Validate identity inputs and installer
+        run: |
+          python3 -m unittest discover -s tests/external-services/unit -v
+          bash -n tests/external-services/install-keycloak
+          shellcheck -x tests/external-services/install-keycloak
+      - name: Pull pinned images for the runner architecture
+        run: |
+          python3 - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          images = json.loads(Path('tests/external-services/images.json').read_text())
+          for name in ('keycloak', 'praxis'):
+              subprocess.run(['sudo', 'podman', 'pull', images[name]['image']], check=True)
+          PY
+      - name: Check isolated issuer routes and lockout
+        run: |
+          sudo python3 tests/external-services/issuer-routes-runtime.py
+          sudo python3 tests/external-services/issuer-lockout.py
