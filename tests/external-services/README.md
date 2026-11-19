@@ -1,4 +1,4 @@
-# External identity tests
+# External identity and observability tests
 
 The issuer slice provides a shared realm generator, protected RHEL Quadlet
 inputs, a dedicated-host installer and isolated security probes.
@@ -35,3 +35,33 @@ are separate evidence from the RHEL Quadlet installation.
 deployment or benchmark modules. `images.json` records the issuer's pinned
 images. The role certificate generator also prepares future gateway and
 telemetry bundles, with separate HTTPS and client-authentication trust.
+
+## Observability transport
+
+[RHEL observability and gateway relay](../../docs/testing/external-services/observability-rhel.md)
+
+The shared `service_config.py` renderer does not import a benchmark runner.
+It generates the store configurations and a transport-test dashboard. Production
+panels, alerts and benchmark dashboards are separate additions.
+
+With the pinned images from `images.json` and the Python image from
+`scripts/pricetag/prepare.py` available in Podman:
+
+```console
+python3 tests/external-services/private-issuer-runtime.py --keycloak
+python3 tests/external-services/redaction.py
+python3 tests/external-services/telemetry-runtime.py
+```
+
+The first probe checks private issuer resolution, real login/PKCE and OAuth2
+Proxy group enforcement. The second checks client-certificate rejection, plain
+and compressed payload limits, and privacy for logs, traces and five metric
+kinds. The third provisions Perses and checks queryable signals in Prometheus,
+Loki and Tempo. Only the redaction probe publishes a random loopback port;
+other fixtures have no published ports. They use generated test credentials
+and clean up only their own temporary resources.
+
+The `external-observability.yml` workflow runs these probes on Linux, using
+native-architecture pinned images and no cloud credentials. They do not install
+services or certificates on the host. RHEL installation requires separate
+SELinux, firewall, restart, storage and network qualification.
