@@ -15,7 +15,7 @@ Run these commands from the clone.
 
 ```bash
 python3 -m venv .state/local-venv
-.state/local-venv/bin/pip install 'PyYAML==6.0.3'
+.state/local-venv/bin/pip install 'PyYAML==6.0.3' -r tests/external-services/stress-requirements.txt
 npm ci --prefix tests/pricetag/browser --ignore-scripts
 tests/pricetag/browser/node_modules/.bin/playwright install chromium
 ```
@@ -51,10 +51,14 @@ ENMAAS_LAB_INSTANCE=external-ci \
   .state/local-venv/bin/python tests/external-services/local-qualification.py
 ```
 
-The runner refuses existing state or pods, runs browser/API checks and removes
+The runner refuses existing state, pods or retained data volumes, runs browser/API checks and removes
 only its labelled containers and secrets. Private evidence remains in
 `.state/external-ci/`; named data volumes remain for inspection. Never upload
-the whole state directory: it contains test credentials and the private CA.
+the whole state directory: it contains test credentials and the private CA. For another
+local run without deleting evidence, select a fresh `external-ci-` name followed
+by 8–12 hexadecimal characters. Both qualification runners accept this form.
+Use an unused `ENMAAS_LAB_PORT_OFFSET` and check all four resulting ports against
+other fixtures; different offsets can still overlap between service ports.
 
 Checks cover verified TLS and telemetry redaction; browser SSO, group and
 current-role enforcement; user provisioning, budgets, finite keys and retirement;
@@ -80,7 +84,7 @@ export ENMAAS_LAB_PORT_OFFSET=12000
 .state/local-venv/bin/python tests/external-services/local.py test &&
 .state/local-venv/bin/python tests/external-services/gateway-sso.py start \
   --metering-image localhost/pricetag-metering:upstream-2281e1a \
-  --maas-image localhost/pricetag-maas:standalone \
+  --maas-image localhost/pricetag-maas:standalone --mock-profiles \
   --praxis-image quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8 &&
 .state/local-venv/bin/python tests/external-services/gateway-sso.py test
 ```
@@ -116,3 +120,40 @@ Stop the sampler with Ctrl-C, then remove only this fixture's containers/secrets
 Keep `.state/local-review/` and its named volumes together if retaining evidence.
 Do not reuse old databases with freshly generated credentials. No command here
 prunes the engine or removes another deployment.
+
+## Run a mock benchmark
+
+Keep the fixture above running and enable its gateway telemetry first. The workload
+mixes the configured mock providers, human and bot profiles, and API clients.
+Each phase admits requests for the selected duration, then drains outstanding work.
+
+```bash
+.state/local-venv/bin/python tests/external-services/local-benchmark.py \
+  --praxis-image quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8 \
+  --scenario sustained --duration 600
+```
+
+Use `--duration 65` for a shorter acceptance run. The final output prints the
+protected `RUN_DIR`; use that value to validate the run and generate its report:
+
+```bash
+.state/local-venv/bin/python tests/external-services/monitoring-result.py "$RUN_DIR"
+```
+
+For the complete fresh-fixture benchmark, use this **instead of** the service-only
+qualification command. It refuses existing `external-ci` state, validates streaming,
+accounting and browser data, then removes its containers and secrets. After the
+benchmark retires its callers, the runner explicitly prepares Alice's 25-member
+synthetic display team with the [team helper](local-dashboards.md). It verifies
+all inference keys remain revoked/expired before checking active-user charts.
+This affects only the disposable fixture; retained evidence volumes are private.
+
+```bash
+ENMAAS_LAB_INSTANCE=external-ci \
+  .state/local-venv/bin/python tests/external-services/ci-runtime.py --duration 65
+```
+
+The **Local stack qualification** workflow offers the same `benchmark` option;
+choose 65 or 600 seconds per sustained phase. Its small streaming staircase is an
+acceptance test, not a maximum-throughput claim. Read the [scenario and capacity
+controls](benchmark.md), [dashboard guide](local-dashboards.md), and [report guide](report.md).

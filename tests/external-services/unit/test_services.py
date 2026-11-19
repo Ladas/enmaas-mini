@@ -31,7 +31,7 @@ class Services(unittest.TestCase):
         self.assertLess(ids.index('keycloak-install'),ids.index('observability-install'))
         self.assertLess(ids.index('gateway-install'),ids.index('telemetry-install'))
         text=json.dumps(plan)
-        self.assertIn('--non-interactive',text);self.assertNotIn('--mock-profiles',text)
+        self.assertIn('--non-interactive',text);self.assertIn('--mock-profiles',text)
         self.assertIn('--issuer-name',text);self.assertIn('10.42.0.10',text)
         self.assertNotIn('0.0.0.0/0',text)
         self.assertLess(ids.index('population-create'),ids.index('population-transfer'))
@@ -49,6 +49,7 @@ class Services(unittest.TestCase):
         # Parse the exact command with the installer, without reading secrets or hosts.
         args=s.installer.parse_args(step['argv'][2:]+['--plan'])
         self.assertEqual(args.mode,'mock')
+        self.assertTrue(args.mock_profiles)
         self.assertEqual(args.metering_revision,'2281e1a84bfc3b998e7db36bc01bae88130bfcdd')
         self.assertEqual(args.praxis_image,
             'quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8')
@@ -66,7 +67,7 @@ class Services(unittest.TestCase):
         self.assertIn('not been checked',summary['status'])
         self.assertEqual(set(summary['browser_password_commands']),{'admin','alice','bob'})
         commands=[*summary['browser_password_commands'].values(),*summary['population_user_1'].values(),
-                  summary['bootstrap_administrator_key'],summary['provider_inventory']]
+                  summary['bootstrap_administrator_key'],summary['provider_inventory'],summary['mock_benchmark']]
         for command in commands:
             args=shlex.split(command)
             self.assertEqual(args[:3],['ssh','-F','/dev/null'])

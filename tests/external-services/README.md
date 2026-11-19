@@ -12,7 +12,9 @@ inputs, a dedicated-host installer and isolated security probes.
 Run unit contracts without cloud credentials or containers:
 
 ```console
-python3 -m unittest discover -s tests/external-services/unit -v
+python3 -m venv .state/test-venv
+.state/test-venv/bin/pip install -r tests/aws/requirements.txt -r tests/external-services/stress-requirements.txt
+PYTHONPATH=tests/external-services .state/test-venv/bin/python -m unittest discover -s tests/external-services/unit -v
 bash -n tests/external-services/install-keycloak
 shellcheck -x tests/external-services/install-keycloak
 ```
@@ -93,3 +95,11 @@ Start with [scoped operator access](../../docs/testing/external-services/operato
 then [dedicated infrastructure](../../docs/testing/external-services/infrastructure.md).
 [Cleanup](../../docs/testing/external-services/cleanup.md) lists owned resources and
 which deletion operations remain manual. Live IAM and RHEL qualification is pending.
+
+## Streaming and sustained mock load
+
+[Benchmark commands and multiworker limits](../../docs/testing/external-services/benchmark.md)
+cover host or isolated Podman generators, request-duration distributions, result
+verification and restoration. Only the local fixture opts into benchmark dashboards;
+operational service rendering stays separate. The explicit CI benchmark mode builds
+two nonroot generator workers and checks real streaming/accounting before cleanup.

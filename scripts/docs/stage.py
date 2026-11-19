@@ -41,6 +41,11 @@ PUBLISHED_TESTING_DOCS = frozenset(
         "docs/testing/external-services/observability-rhel.md",
         "docs/testing/external-services/monitoring.md",
         "docs/testing/external-services/three-host-install.md",
+        "docs/testing/external-services/benchmark.md",
+        "docs/testing/external-services/local-dashboards.md",
+        "docs/testing/external-services/report.md",
+        "docs/testing/external-services/storage.md",
+        "docs/testing/external-services/local-podman.md",
         "docs/testing/external-services/aws.md",
         "docs/testing/external-services/infrastructure.md",
         "docs/testing/external-services/operator-access.md",
@@ -48,7 +53,6 @@ PUBLISHED_TESTING_DOCS = frozenset(
         "docs/testing/external-services/dns.md",
         "docs/testing/external-services/rds.md",
         "docs/testing/external-services/network.md",
-        "docs/testing/external-services/local-podman.md",
     )
 )
 EXCLUDED_SOURCES: tuple[Path, ...] = ()

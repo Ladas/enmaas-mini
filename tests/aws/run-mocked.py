@@ -14,6 +14,8 @@ import coverage
 
 ROOT = Path(__file__).resolve().parents[2]
 TESTS = (
+    'tests/pricetag/install.py',
+    'tests/pricetag/install-orchestration.py',
     'tests/aws/plan.py',
     'tests/aws/environment.py',
     'tests/aws/auxiliary.py',
@@ -50,6 +52,7 @@ TESTS = (
 )
 # Keep this gate aligned with coverage.ini when adding orchestration modules.
 FULL_COVERAGE = (
+    'scripts/pricetag/install.py',
     'scripts/aws/rhel-vm',
     'scripts/aws/environment.py',
     'tests/external-services/network.py',

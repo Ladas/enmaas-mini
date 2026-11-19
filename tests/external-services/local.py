@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 
 HERE = Path(__file__).resolve().parent
-_monitor_spec=importlib.util.spec_from_file_location('lab_monitoring',HERE/'monitoring.py')
+_monitor_spec=importlib.util.spec_from_file_location('lab_monitoring',HERE/'benchmark_monitoring.py')
 monitoring=importlib.util.module_from_spec(_monitor_spec);_monitor_spec.loader.exec_module(monitoring)
 ROOT = HERE.parents[1]
 INSTANCE = os.environ.get('ENMAAS_LAB_INSTANCE', 'external-local')
@@ -45,7 +45,7 @@ PORTS = tuple(port(role) for role in ('issuer', 'observability', 'collector'))
 IMAGES = {name: entry['image'] for name, entry in json.loads((HERE/'images.json').read_text()).items()}
 _service_spec=importlib.util.spec_from_file_location('local_service_config',HERE/'service_config.py')
 service_config=importlib.util.module_from_spec(_service_spec);_service_spec.loader.exec_module(service_config)
-PERSES_ASSETS=service_config.PERSES_ASSETS
+PERSES_ASSETS=(*service_config.PERSES_ASSETS, 'benchmark-dashboard.json')
 privacy_transform=service_config.privacy_transform
 
 
@@ -87,6 +87,7 @@ def configure(root, certificates=True, authorization_test=False):
  health-enabled=true
 '''.replace('\n ', '\n'))
     service_config.configure(root,credentials['oidc'])
+    monitoring.write(root)  # Benchmark assets belong only to the disposable local lab.
     # Render only the known listener ports in this fixture's new configuration.
     # One regex pass prevents a shifted port being shifted again.
     pattern = r'(?<=:)(18443|19443|24443|28443)(?![0-9])'

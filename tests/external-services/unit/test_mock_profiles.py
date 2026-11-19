@@ -89,6 +89,31 @@ class ReplacementSafety(unittest.TestCase):
             models = json.loads(files[deploy / 'models.json'])
             self.assertFalse(any(m['model'] == 'rits/zai-org/glm-5-3' for m in models))
 
+    def test_benchmark_rejects_real_credentials_and_remote_endpoint(self):
+        loader = importlib.machinery.SourceFileLoader('profile_benchmark', str(ROOT / 'scripts/pricetag/benchmark'))
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        benchmark = importlib.util.module_from_spec(spec)
+        loader.exec_module(benchmark)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'quadlets').mkdir(); (root / 'gateway').mkdir()
+            (root / 'models.json').write_text(json.dumps(configuration()['models']))
+            unit = ('Network=pricetag-mock.network\n'
+                    'Secret=pricetag-mock-openai-v1,type=env,target=OPENAI_API_KEY\n'
+                    'Secret=pricetag-mock-external-v1,type=env,target=CUSTOM_EXTERNAL_API_KEY\n')
+            unit_path = root / 'quadlets/pricetag-gateway.container'
+            config_path = root / 'gateway/gateway.json'
+            unit_path.write_text(unit)
+            config = native_inputs(configuration())
+            config_path.write_text(json.dumps(config))
+            benchmark.require_mock(root)
+            unit_path.write_text(unit.replace('pricetag-mock-openai-v1', 'praxis-openai-api-key-v1'))
+            with self.assertRaises(ValueError): benchmark.require_mock(root)
+            unit_path.write_text(unit)
+            config_path.write_text(json.dumps(config).replace('pricetag-provider:18080', 'api.example:443'))
+            with self.assertRaises(ValueError): benchmark.require_mock(root)
+
+
 
 if __name__ == '__main__':
     unittest.main()

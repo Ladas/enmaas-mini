@@ -60,5 +60,17 @@ aws_lab_info
             self.assertIn(f'export {role}_HOST_IP=198.51.100.10',result.stdout)
             self.assertIn(f'export {role}_PRIVATE_IP=172.31.0.10',result.stdout)
 
+    def test_traffic_plan_is_mocked_bounded_and_has_an_unqualified_runner(self):
+        plan = json.loads((HERE/'traffic-patterns.json').read_text())
+        self.assertIs(plan['mock_only'], True)
+        self.assertEqual(plan['phase_seconds'], 600)
+        self.assertEqual(len(plan['phases']), 6)
+        for phase in plan['phases']:
+            self.assertLessEqual(phase['users'] * phase['streams_per_user'], 512)
+        self.assertEqual(plan['runner'], 'tests/external-services/benchmark.py')
+        self.assertTrue((HERE.parents[1]/plan['runner']).is_file())
+        self.assertIn('RHEL execution pending', plan['runner_status'])
+
+
 if __name__ == '__main__':
     unittest.main()
