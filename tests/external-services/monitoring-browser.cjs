@@ -9,10 +9,14 @@ const definitions=JSON.parse(readFileSync(index,'utf8'));
 
 (async()=>{
  const browser=await chromium.launch({headless:true});
+ const context=await browser.newContext({viewport:{width:1440,height:1000}});
+ const page=await context.newPage();
+ if(evidence) {
+  mkdirSync(evidence,{recursive:true,mode:0o700});
+  await context.tracing.start({screenshots:true,snapshots:true});
+ }
  try {
-  const page=await browser.newPage({viewport:{width:1440,height:1000}});
   const errors=[];page.on('pageerror',error=>errors.push(error.name));
-  if(evidence)mkdirSync(evidence,{recursive:true,mode:0o700});
   for(const name of ['monitoring','host','components','accounting','gateway','alerts','traces','trace-detail','logs']) {
    const definition=definitions.find(d=>d.metadata.name==='enmaas-'+name);
    assert(definition,`missing definition: ${name}`);
@@ -51,5 +55,11 @@ const definitions=JSON.parse(readFileSync(index,'utf8'));
    if(evidence)await page.screenshot({path:`${evidence}/${name}.png`});
    console.log(`PASS: ${name} renders ${panels.length} reachable panels`);
   }
+ } catch(error) {
+  if(evidence) {
+   await page.screenshot({path:`${evidence}/failure.png`}).catch(()=>{});
+   await context.tracing.stop({path:`${evidence}/failure-trace.zip`}).catch(()=>{});
+  }
+  throw error;
  } finally {await browser.close();}
 })().catch(error=>{console.error(error.message);process.exitCode=1;});

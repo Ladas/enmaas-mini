@@ -65,6 +65,13 @@ known signals in Prometheus, Loki and Tempo. Only the redaction probe publishes 
 other fixtures have no published ports. They use generated test credentials
 and clean up only their own temporary resources.
 
+Add `--browser` to the telemetry probe to check all operational dashboards
+with Playwright. Rootless runs publish only an ephemeral loopback Perses port.
+Rootful Linux CI uses `nsenter` to run the browser in the disposable pod's network
+namespace: the network stays internal and no host ports are published. This is
+a test-runner operation; deployed services remain rootless. Browser failures
+retain synthetic-only screenshots and a Playwright trace for diagnosis.
+
 The `external-observability.yml` workflow runs these probes on Linux, using
 native-architecture pinned images and no cloud credentials. They do not install
 services or certificates on the host. RHEL installation requires separate
