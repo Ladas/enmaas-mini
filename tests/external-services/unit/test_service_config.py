@@ -46,7 +46,10 @@ class ServiceConfig(unittest.TestCase):
             perses=yaml.safe_load((root/'perses.yaml').read_text())
             self.assertTrue(perses['datasource']['disable_local'])
             self.assertEqual(perses['datasource']['proxy']['allowed_networks'],['127.0.0.1/32'])
-            self.assertEqual(yaml.safe_load((root/'monitoring-rules.yaml').read_text()),{'groups':[]})
+            self.assertEqual(yaml.safe_load((root/'monitoring-rules.yaml').read_text()),config.monitoring.rules())
+            for name,expected in config.monitoring.all_dashboards().items():
+                self.assertEqual(json.loads((root/name).read_text()),expected)
+            self.assertNotIn('benchmark-dashboard.json',config.PERSES_ASSETS)
             self.assertEqual(json.loads((root/'dashboard.json').read_text())['metadata']['name'],'local-transport')
 
 

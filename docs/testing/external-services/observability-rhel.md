@@ -3,8 +3,9 @@
 Deploy Perses, Prometheus, Loki, Tempo and an OpenTelemetry Collector on a
 **fresh RHEL test VM**, with OAuth2 Proxy enforcing the Keycloak
 `/observability-admin` group. Containers run as rootless `praxis-svc` Quadlet
-services. This guide installs telemetry transport and a small transport-test
-dashboard; gateway dashboards, alerts and benchmark scenarios are separate.
+services. This guide installs telemetry transport and the
+[operational dashboards and alerts](monitoring.md). Benchmark scenarios are
+separate; available panels do not imply that every source is connected.
 
 ## Network and trust
 

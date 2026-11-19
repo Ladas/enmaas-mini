@@ -103,6 +103,7 @@ nav:
       - AWS operations: docs/testing/aws-operations.md
       - Keycloak test host: docs/testing/external-services/keycloak-rhel.md
       - Observability test host: docs/testing/external-services/observability-rhel.md
+      - Operational monitoring: docs/testing/external-services/monitoring.md
 
 extra_css:
   - assets/stylesheets/redhat.css
