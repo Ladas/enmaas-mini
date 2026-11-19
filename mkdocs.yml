@@ -104,6 +104,7 @@ nav:
       - Keycloak test host: docs/testing/external-services/keycloak-rhel.md
       - Observability test host: docs/testing/external-services/observability-rhel.md
       - Operational monitoring: docs/testing/external-services/monitoring.md
+      - Three-host test installation: docs/testing/external-services/three-host-install.md
 
 extra_css:
   - assets/stylesheets/redhat.css

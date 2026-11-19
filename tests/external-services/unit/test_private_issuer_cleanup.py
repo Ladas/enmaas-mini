@@ -11,6 +11,26 @@ p=importlib.util.module_from_spec(spec);spec.loader.exec_module(p)
 
 
 class Cleanup(unittest.TestCase):
+    def test_population_failure_reports_only_bounded_progress(self):
+        progress={'stage':'create','created':4095,'verified':4095,'deleted':4095,'errno':28}
+        with self.assertRaisesRegex(RuntimeError,'4095'):
+            p.report_population_failure(json.dumps(progress))
+        for output in ('secret-sentinel','[]',json.dumps(dict(progress,password='secret-sentinel')),
+                       json.dumps(dict(progress,stage='secret-sentinel')),json.dumps(dict(progress,created=-1)),
+                       json.dumps(dict(progress,errno='secret-sentinel'))):
+            with self.assertRaises(RuntimeError) as caught:p.report_population_failure(output)
+            self.assertNotIn('secret-sentinel',str(caught.exception))
+
+    def test_population_bounds_fail_before_runtime_operations(self):
+        for count in (0,10001,True,'20'):
+            with patch.object(p,'command') as command,self.assertRaises(ValueError):
+                p.main(keycloak=True,provisioning=True,population_count=count)
+            command.assert_not_called()
+        with patch.object(p,'command') as command,self.assertRaises(ValueError):
+            p.main(population_count=100)
+        command.assert_not_called()
+
+
     def test_cleanup_continues_after_failure_and_is_bounded(self):
         with patch.object(p,'command',side_effect=[subprocess.TimeoutExpired('podman',10),Mock(returncode=1),Mock(returncode=0),Mock(returncode=0)]) as run:
             with self.assertRaisesRegex(RuntimeError,'cleanup incomplete'):
