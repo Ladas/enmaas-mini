@@ -34,6 +34,7 @@ class Controller(base.LocalController):
         self.bridge=None;self.provider=None;self.provider_memory_mib=512
         self.gateway_memory_mib=None;self.restoring=False;self.original_gateway_memory=None
         self.keep_gateway_running=False;self.last_gateway_setup=None
+        self.database_profile=False
         self.generator_image=None;self.generator_workers=1;self.generator_memory_mib=512
         self.bridge_name=lab.POD+'-'+self.name+'-api'
 
@@ -151,6 +152,8 @@ async def exercise(controller,rows,stop):
         controller.phase(dict(phase,streams_per_user=1,cycle=1))
         await asyncio.sleep(3)
         controller.guard()
+        profiler=base.load('database-profile.py','database_profile') if controller.database_profile is True else None
+        db_before=await asyncio.to_thread(profiler.snapshot,lab.POD) if profiler else None
         finished=asyncio.Event()
         snapshot={}
         async def observe():
@@ -189,6 +192,14 @@ async def exercise(controller,rows,stop):
             if snapshot:
                 await asyncio.to_thread(base.signals.send,'metrics',stress_payload(dict(snapshot),phase['concurrency']))
             controller.persist(phase,result)
+            if profiler:
+                db_after=await asyncio.to_thread(profiler.snapshot,lab.POD)
+                costs=profiler.compare(db_before,db_after)
+                lab.write(controller.output,phase['name']+'-database.json',{
+                    'phase':phase['name'],'statistics_epoch':db_after['stats_reset'],
+                    'scope':'metering database; successful statement execution; category is heuristic',
+                    'maximum_scope':'since statistics reset, not phase maximum',
+                    'statements':costs})
             reason=escalation_stop(result)
             if reason:
                 stop_reason=reason;controller.summary['escalation_stop']=reason;controller.save()
@@ -208,6 +219,7 @@ def main():
     parser.add_argument('--praxis-image',required=True)
     parser.add_argument('--provider-image',required=True)
     parser.add_argument('--duration',type=int,default=600)
+    parser.add_argument('--database-profile',action='store_true',help='Collect anonymized statement costs per phase; requires preloaded pg_stat_statements')
     parser.add_argument('--profile',choices=('decade','gradual','extended','full','higher'),default='decade',help='Gradual: 10/50/100/150; extended: 100/150/200/250; full: 10/50/100/150/200/250; higher: 500/750/1000 requests/s, then recovery')
     parser.add_argument('--keep-gateway-running',action='store_true',help='Reuse a running gateway between stages with identical policy and limits')
     parser.add_argument('--concurrency',type=int,default=5000)
@@ -238,6 +250,7 @@ def main():
     controller.generator_image=args.generator_image
     controller.generator_workers=args.workers
     controller.generator_memory_mib=args.generator_memory_mib
+    controller.database_profile=args.database_profile
     controller.key_lifetime='8h'
     controller.keep_gateway_running=args.keep_gateway_running
     controller.gateway_memory_mib=args.gateway_memory_mib

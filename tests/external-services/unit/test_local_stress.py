@@ -14,7 +14,7 @@ stress=importlib.util.module_from_spec(spec);spec.loader.exec_module(stress)
 class LocalStress(unittest.IsolatedAsyncioTestCase):
     def controller(self):
         c=MagicMock();c.callers=[('synthetic','key')]*2500
-        c.profiles=[{'api':'openai'}]*2500;c.summary={};c.generator_image=None
+        c.profiles=[{'api':'openai'}]*2500;c.summary={};c.database_profile=False;c.generator_image=None
         return c
 
     async def test_generator_limit_skips_escalation_but_runs_recovery(self):
@@ -41,6 +41,18 @@ class LocalStress(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(write.call_args.args[1],'stress_10-workers.json')
         self.assertFalse(write.call_args.args[2][0]['state']['OOMKilled'])
 
+    async def test_database_profile_records_phase_only_after_valid_comparison(self):
+        c=self.controller();c.database_profile=True
+        profiler=MagicMock();profiler.snapshot.side_effect=[{'stats_reset':'epoch','rows':[]},{'stats_reset':'epoch','rows':[]}]
+        profiler.compare.return_value=[]
+        transport=MagicMock();transport.__aenter__=AsyncMock(return_value=AsyncMock());transport.__aexit__=AsyncMock()
+        with patch.object(stress.base.LocalController,'provision_users'),patch.object(stress.base,'load',return_value=profiler),patch.object(stress.lab,'write') as write,patch.object(stress,'AsyncTransport',return_value=transport),patch.object(stress,'run_phase',AsyncMock(return_value={'offered_slots':10,'statuses':{'200':10},'errors':{}})),patch.object(stress.asyncio,'sleep',AsyncMock()):
+            await stress.exercise(c,[plan(duration=1)[0]],threading.Event())
+        self.assertEqual(profiler.snapshot.call_count,2)
+        profiler.compare.assert_called_once()
+        self.assertEqual(write.call_args.args[1],'stress_10-database.json')
+        self.assertEqual(write.call_args.args[2]['statements'],[])
+        self.assertIn('not phase maximum',write.call_args.args[2]['maximum_scope'])
 
     async def test_phase_response_duration_is_forwarded_to_transport(self):
         c=self.controller()
