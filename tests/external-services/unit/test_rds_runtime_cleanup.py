@@ -12,6 +12,23 @@ spec.loader.exec_module(runtime)
 
 
 class Cleanup(unittest.TestCase):
+    def test_readiness_waits_for_final_tcp_server(self):
+        command = Mock(side_effect=[Mock(returncode=2), Mock(returncode=0)])
+        with patch.object(runtime.time, 'sleep') as sleep:
+            runtime.wait_database(command, 'owned-db')
+        self.assertEqual(command.call_count, 2)
+        # The image's temporary initialization server accepts Unix sockets only.
+        command.assert_called_with(
+            ['exec', 'owned-db', 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres'], check=False)
+        sleep.assert_called_once_with(0.5)
+
+    def test_readiness_timeout_is_bounded_and_redacted(self):
+        command = Mock(return_value=Mock(returncode=2, stderr='secret-sentinel'))
+        with patch.object(runtime.time, 'sleep'), self.assertRaisesRegex(RuntimeError, 'readiness timeout') as error:
+            runtime.wait_database(command, 'owned-db')
+        self.assertEqual(command.call_count, 60)
+        self.assertNotIn('secret-sentinel', str(error.exception))
+
     def test_cleanup_is_bounded_and_attempts_secret_after_container_failure(self):
         for failure in (Mock(returncode=1), OSError('secret-sentinel'),
                         subprocess.TimeoutExpired('podman', 30)):
