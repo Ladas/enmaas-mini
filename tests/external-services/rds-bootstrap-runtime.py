@@ -28,6 +28,16 @@ def cleanup(name, secret_name, *, container, secret):
     if failed:raise RuntimeError('Disposable database cleanup incomplete; inspect '+name)
 
 
+def wait_database(command, name):
+    # The entrypoint's temporary initialization server accepts Unix sockets.
+    # Wait for the final TCP listener before sending non-retryable role DDL.
+    for _ in range(60):
+        if command(['exec', name, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres'], check=False).returncode == 0:
+            return
+        time.sleep(0.5)
+    raise RuntimeError('Database readiness timeout')
+
+
 def run():
     image=json.loads((ROOT/'images.json').read_text())['db']['image']
     name='enmaas-db-role-test-'+secrets.token_hex(6)
@@ -47,10 +57,7 @@ def run():
         command(['run','-d','--name',name,'--network','none','--memory','256m','--cpus','1',
             '--label','io.enmaas.test-lab=database-role-test','--secret',secret+',type=env,target=POSTGRES_PASSWORD',
             '-e','POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256',image])
-        for _ in range(60):
-            if command(['exec',name,'pg_isready','-U','postgres'],check=False).returncode==0:break
-            time.sleep(0.5)
-        else:raise RuntimeError('Database readiness timeout')
+        wait_database(command, name)
         def admin(sql):
             return command(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-v','ON_ERROR_STOP=1'],sql).stdout.strip()
         admin(bootstrap.role_sql(passwords))
