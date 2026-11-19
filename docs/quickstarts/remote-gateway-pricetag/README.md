@@ -8,6 +8,8 @@ OpenCode with a user key and a monthly USD budget.
 authentication, routing and current boundaries.
 [External PostgreSQL databases](external-database.md) explains the required
 `maas` and `metering` databases, TLS settings, and installer flags.
+[External sign-in and supplied TLS](external-auth.md) covers optional OIDC
+configuration, identity registration and certificate requirements.
 
 **Needs:** a fresh RHEL 9.6 x86_64 host with sudo, outbound HTTPS, and inbound
 SSH/8443 from your IP; Git, Python 3 and OpenCode on your workstation.
@@ -88,6 +90,8 @@ whose personal-key page is **My keys** (`/management`). The candidate uses
 | `--mode mock` | Use synthetic providers for [benchmarks](../../testing/pricetag-perf.md). |
 | `--maas-database-url-file PATH` | Use an existing external MaaS database; see [external PostgreSQL](external-database.md). |
 | `--metering-database-url-file PATH` | Use an existing external metering database; both database flags are required together. |
+| `--oidc-config PATH` | Private OIDC configuration; requires a compatible PriceTag source revision. |
+| `--tls-bundle PATH` | Validated server certificate, private key and CA bundle. |
 
 External setup accepts one or both APIs; one key must cover the selected APIs.
 Credentials and model presets are checked before installation. Prices are loaded
