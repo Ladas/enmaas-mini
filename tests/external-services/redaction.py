@@ -103,7 +103,9 @@ def main(host_sample=None):
                 for metric in scope['metrics']:
                     if not metric['name'].startswith('enmaas_host_'):raise ValueError('Expected aggregate host sample')
                     expected_host[metric['name']]=metric
-        if len(expected_host)!=4:raise ValueError('Expected four host metrics')
+        if set(expected_host)!={'enmaas_host_sample_unixtime_seconds','enmaas_host_cpu_seconds',
+                               'enmaas_host_memory_bytes','enmaas_host_load','enmaas_host_disk_bytes'}:
+            raise ValueError('Expected the complete five-metric host sample')
         data['metrics']['resourceMetrics'].extend(host['resourceMetrics'])
     name='enmaas-redaction-'+uuid.uuid4().hex[:8]
     created=[];started=False

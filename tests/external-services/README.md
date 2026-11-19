@@ -41,8 +41,10 @@ telemetry bundles, with separate HTTPS and client-authentication trust.
 [RHEL observability and gateway relay](../../docs/testing/external-services/observability-rhel.md)
 
 The shared `service_config.py` renderer does not import a benchmark runner.
-It generates the store configurations and a transport-test dashboard. Production
-panels, alerts and benchmark dashboards are separate additions.
+It generates store configurations, the transport-test dashboard and operational
+panels/alerts. Benchmark dashboards remain separate. See the
+[monitoring guide](../../docs/testing/external-services/monitoring.md) for source
+coverage, interpretation and browser/query checks.
 
 With the pinned images from `images.json` and the Python image from
 `scripts/pricetag/prepare.py` available in Podman:
@@ -50,14 +52,16 @@ With the pinned images from `images.json` and the Python image from
 ```console
 python3 tests/external-services/private-issuer-runtime.py --keycloak
 python3 tests/external-services/redaction.py
+python3 tests/external-services/test-alert-rules.py
 python3 tests/external-services/telemetry-runtime.py
 ```
 
 The first probe checks private issuer resolution, real login/PKCE and OAuth2
 Proxy group enforcement. The second checks client-certificate rejection, plain
 and compressed payload limits, and privacy for logs, traces and five metric
-kinds. The third provisions Perses and checks queryable signals in Prometheus,
-Loki and Tempo. Only the redaction probe publishes a random loopback port;
+kinds. The rule test checks deterministic alert timing and query semantics. The
+transport test provisions Perses and checks every operational query against
+known signals in Prometheus, Loki and Tempo. Only the redaction probe publishes a random loopback port;
 other fixtures have no published ports. They use generated test credentials
 and clean up only their own temporary resources.
 

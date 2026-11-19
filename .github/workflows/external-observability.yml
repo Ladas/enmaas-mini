@@ -7,6 +7,7 @@ on:
       - 'tests/external-services/**'
       - 'scripts/pricetag/prepare.py'
       - 'scripts/common/**'
+      - 'tests/pricetag/browser/package*.json'
   push:
     branches: [main]
     paths:
@@ -14,6 +15,7 @@ on:
       - 'tests/external-services/**'
       - 'scripts/pricetag/prepare.py'
       - 'scripts/common/**'
+      - 'tests/pricetag/browser/package*.json'
   workflow_dispatch:
 
 permissions:
@@ -41,6 +43,10 @@ jobs:
           bash -n tests/external-services/install-observability
           bash -n tests/external-services/install-telemetry-agent
           shellcheck -x tests/external-services/install-observability tests/external-services/install-telemetry-agent
+      - name: Install pinned browser tools
+        run: |
+          npm ci --prefix tests/pricetag/browser --ignore-scripts
+          sudo tests/pricetag/browser/node_modules/.bin/playwright install --with-deps chromium
       - name: Pull pinned images for the runner architecture
         run: |
           python3 - <<'PY'
@@ -58,4 +64,5 @@ jobs:
         run: |
           sudo python3 tests/external-services/private-issuer-runtime.py --keycloak
           sudo python3 tests/external-services/redaction.py
-          sudo python3 tests/external-services/telemetry-runtime.py
+          sudo python3 tests/external-services/test-alert-rules.py
+          sudo env NODE_PATH="$GITHUB_WORKSPACE/tests/pricetag/browser/node_modules" python3 tests/external-services/telemetry-runtime.py --browser

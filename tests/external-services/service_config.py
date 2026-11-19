@@ -10,10 +10,13 @@ HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location('service_realm_inputs', HERE/'realm.py')
 realm = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(realm)
+spec = importlib.util.spec_from_file_location('service_monitoring', HERE/'monitoring.py')
+monitoring = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(monitoring)
 write = realm.write
 IMAGES = realm.IMAGES
 PERSES_ASSETS = ('project.json', 'datasource.json', 'dashboard.json',
-                 'tempo-datasource.json', 'loki-datasource.json')
+                 'tempo-datasource.json', 'loki-datasource.json', *monitoring.all_dashboards())
 
 
 def privacy_transform(*, classify=False):
@@ -117,7 +120,9 @@ provisioning:
     write(root, 'dashboard.json', transport_dashboard())
     for name in ('tempo-datasource.json', 'loki-datasource.json'):
         write(root, name, json.loads((HERE/'perses'/name).read_text()))
-    write(root, 'monitoring-rules.yaml', yaml.safe_dump({'groups': []}))
+    for name, document in monitoring.all_dashboards().items():
+        write(root, name, document)
+    write(root, 'monitoring-rules.yaml', yaml.safe_dump(monitoring.rules(), sort_keys=False))
     write(root, 'prometheus.yaml', '''rule_files:
   - /lab/monitoring-rules.yaml
 global:
