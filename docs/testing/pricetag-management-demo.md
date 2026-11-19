@@ -15,7 +15,7 @@ read -r -p 'Gateway IP or DNS: ' GATEWAY_HOST
 sudo scripts/pricetag/install --hostname "$GATEWAY_HOST" \
   --mode mock --demo-fixture --yes --image-mode source \
   --maas-revision 6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d \
-  --metering-revision 0c8e00d4126d72e3b8ec392d26b2b9eae3db7434
+  --metering-revision 08800db38c83d3ac50694cba81df136311bc9dc2
 ```
 
 Keep TCP 8443 restricted to the testing IPs. Existing deployments are refused.
