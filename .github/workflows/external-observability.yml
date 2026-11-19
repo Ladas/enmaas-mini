@@ -5,7 +5,8 @@ on:
     paths:
       - '.github/workflows/external-observability.yml'
       - 'tests/external-services/**'
-      - 'scripts/pricetag/prepare.py'
+      - 'scripts/pricetag/**'
+      - 'tests/pricetag/api.py'
       - 'scripts/common/**'
       - 'tests/pricetag/browser/package*.json'
   push:
@@ -13,7 +14,8 @@ on:
     paths:
       - '.github/workflows/external-observability.yml'
       - 'tests/external-services/**'
-      - 'scripts/pricetag/prepare.py'
+      - 'scripts/pricetag/**'
+      - 'tests/pricetag/api.py'
       - 'scripts/common/**'
       - 'tests/pricetag/browser/package*.json'
   workflow_dispatch:
@@ -40,6 +42,7 @@ jobs:
       - name: Check inputs and installers
         run: |
           python3 -m unittest discover -s tests/external-services/unit -v
+          python3 tests/pricetag/api.py
           bash -n tests/external-services/install-observability
           bash -n tests/external-services/install-telemetry-agent
           shellcheck -x tests/external-services/install-observability tests/external-services/install-telemetry-agent
@@ -62,7 +65,8 @@ jobs:
           PY
       - name: Check private SSO, mTLS, redaction and storage
         run: |
-          sudo python3 tests/external-services/private-issuer-runtime.py --keycloak
+          sudo python3 tests/external-services/transfer-runtime.py
+          sudo python3 tests/external-services/private-issuer-runtime.py --keycloak --provisioning
           sudo python3 tests/external-services/redaction.py
           sudo python3 tests/external-services/test-alert-rules.py
           sudo env NODE_PATH="$GITHUB_WORKSPACE/tests/pricetag/browser/node_modules" python3 tests/external-services/telemetry-runtime.py --browser

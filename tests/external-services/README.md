@@ -69,3 +69,9 @@ The `external-observability.yml` workflow runs these probes on Linux, using
 native-architecture pinned images and no cloud credentials. They do not install
 services or certificates on the host. RHEL installation requires separate
 SELinux, firewall, restart, storage and network qualification.
+
+## Coordinate prepared RHEL hosts
+
+Use the [three-host installation guide](../../docs/testing/external-services/three-host-install.md)
+for an offline plan, verified SSH transfers, per-stage receipts and access commands.
+It creates no AWS resources and refuses existing deployments.
