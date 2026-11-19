@@ -235,3 +235,9 @@ results retain per-user accounting, elapsed/drain time and startup skew. The
 sampled concurrency peak and the sum of worker maxima are separate fields—the
 latter is only an upper bound. This local mode is not a distributed load-generator
 qualification for AWS.
+
+## Optional database diagnostics
+
+[Database profiling](database-profiling.md) compares anonymized PostgreSQL statement
+costs across streaming stages. It requires a separately prepared local database;
+profiling is disabled by default.

@@ -106,6 +106,7 @@ nav:
       - Operational monitoring: docs/testing/external-services/monitoring.md
       - Three-host test installation: docs/testing/external-services/three-host-install.md
       - Mock benchmark scenarios: docs/testing/external-services/benchmark.md
+      - Database profiling: docs/testing/external-services/database-profiling.md
       - Inspect local dashboards: docs/testing/external-services/local-dashboards.md
       - Benchmark reports: docs/testing/external-services/report.md
       - Storage and retention: docs/testing/external-services/storage.md

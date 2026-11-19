@@ -42,6 +42,7 @@ PUBLISHED_TESTING_DOCS = frozenset(
         "docs/testing/external-services/monitoring.md",
         "docs/testing/external-services/three-host-install.md",
         "docs/testing/external-services/benchmark.md",
+        "docs/testing/external-services/database-profiling.md",
         "docs/testing/external-services/local-dashboards.md",
         "docs/testing/external-services/report.md",
         "docs/testing/external-services/storage.md",
