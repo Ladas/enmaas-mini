@@ -94,7 +94,7 @@ def main():
         environment.update(HOME=str(home), AWS_CONFIG_FILE='/dev/null', AWS_SHARED_CREDENTIALS_FILE='/dev/null',
                            AWS_EC2_METADATA_DISABLED='true', AWS_ACCESS_KEY_ID='mock-access-not-valid',
                            AWS_SECRET_ACCESS_KEY='mock-secret-not-valid', AWS_SESSION_TOKEN='mock-session-not-valid',
-                           AWS_DEFAULT_REGION='eu-central-1', COVERAGE_FILE=str(ROOT/'.state/coverage/aws'), PATH=str(home)+os.pathsep+os.environ['PATH'])
+                           AWS_DEFAULT_REGION='eu-central-1', COVERAGE_FILE=str(ROOT/'.state/coverage/aws'), PATH=os.pathsep.join((str(home),str(Path(sys.executable).parent),os.environ['PATH'])))
         cov = coverage.Coverage(config_file=str(ROOT/'tests/aws/coverage.ini'), data_file=str(ROOT/'.state/coverage/aws'))
         cov.erase()
         cov.start()
