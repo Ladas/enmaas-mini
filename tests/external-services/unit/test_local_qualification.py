@@ -35,12 +35,21 @@ class Qualification(unittest.TestCase):
                 if call.called:self.assertEqual(call.call_args.args[0][:3],['podman','pod','exists'])
                 if state_exists:lab.STATE.rmdir()
 
+    def test_retained_volume_refuses_start_without_cleanup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lab=self.fixture(Path(tmp))
+            with patch.dict(os.environ,ENMAAS_LAB_INSTANCE='external-ci'),patch.object(runner.sys,'argv',['qualify']),patch.object(runner,'load_lab',return_value=lab),patch.object(runner.subprocess,'run',side_effect=[SimpleNamespace(returncode=1),SimpleNamespace(returncode=0)]) as call,contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):runner.main()
+            self.assertEqual(call.call_count,2)
+            self.assertEqual(call.call_args.args[0][:3],['podman','volume','exists'])
+            lab.write.assert_not_called()
+
     def test_failed_probe_runs_owned_cleanup_and_never_marks_success(self):
         with tempfile.TemporaryDirectory() as tmp:
             lab=self.fixture(Path(tmp));calls=[]
             def invoke(command,**kwargs):
                 calls.append(command)
-                if command[:3]==['podman','pod','exists']:return SimpleNamespace(returncode=1)
+                if command[:3] in (['podman','pod','exists'],['podman','volume','exists']):return SimpleNamespace(returncode=1)
                 self.assertGreater(kwargs['timeout'],0)
                 if command[1].endswith('signals.py'):raise subprocess.CalledProcessError(1,command)
                 return SimpleNamespace(returncode=0)
@@ -57,7 +66,7 @@ class Qualification(unittest.TestCase):
             for fail_cleanup in (False, True):
                 lab=self.fixture(Path(tmp));cleaned=[]
                 def invoke(command, **kwargs):
-                    if command[:3]==['podman','pod','exists']:
+                    if command[:3] in (['podman','pod','exists'],['podman','volume','exists']):
                         return SimpleNamespace(returncode=1)
                     if command[-2:]==[str(runner.HERE/'local.py'),'down']:
                         if fail_cleanup:raise subprocess.CalledProcessError(1,command)

@@ -144,3 +144,13 @@ class Transport(unittest.TestCase):
         Handler.mode='rate'
         with transport.MockTransport(self.url,self.root/'ca.pem',['key'],'fixture',allow_budget_denials=True) as client:
             self.assertEqual(client(0,1)['denial_reason'],'rate_limit')
+
+    def test_scheduler_with_real_https_denials(self):
+        scenarios = load('scenarios')
+        Handler.mode = 'rate'
+        with transport.MockTransport(self.url,self.root/'ca.pem',['key-a','key-b'],'mock/fixture') as client:
+            report = scenarios.run_phase(client,users=2,lanes=1,duration=.2,offered_rps=20,timeout=.5)
+        self.assertFalse(report['interrupted'])
+        self.assertGreaterEqual(report['admission_seconds'],.19)
+        self.assertGreaterEqual(report['attempts'],2)
+        self.assertEqual(report['statuses'],{'429':report['attempts']})

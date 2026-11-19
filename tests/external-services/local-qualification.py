@@ -4,6 +4,7 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -24,8 +25,8 @@ def main():
     parser.add_argument('--metering-image', default='localhost/pricetag-metering:upstream-2281e1a')
     parser.add_argument('--maas-image', default='localhost/pricetag-maas:standalone')
     args = parser.parse_args()
-    if os.environ.get('ENMAAS_LAB_INSTANCE') != 'external-ci':
-        parser.error('Set ENMAAS_LAB_INSTANCE=external-ci; other fixtures are never reset')
+    if not re.fullmatch(r'external-ci(?:-[a-f0-9]{8,12})?',os.environ.get('ENMAAS_LAB_INSTANCE','')):
+        parser.error('Select external-ci or external-ci-<8 to 12 hex characters>; other fixtures are never reset')
     lab = load_lab()
     if lab.STATE.exists():
         parser.error('Requires fresh local state; preserve or remove previous evidence manually')
@@ -33,6 +34,11 @@ def main():
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
     if existing.returncode != 1:
         parser.error('Cannot establish a fresh pod; existing pods are never reset')
+    for name in ('db','perses','prometheus','loki','tempo'):
+        volume = subprocess.run(['podman','volume','exists',lab.POD+'-'+name],
+                                stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=15)
+        if volume.returncode != 1:
+            parser.error('Cannot establish fresh volumes; retained data is never reused or deleted')
     env = dict(os.environ)
     env.setdefault('NODE_PATH', str(ROOT/'tests/pricetag/browser/node_modules'))
     env['NODE_EXTRA_CA_CERTS'] = str(lab.STATE/'ca.pem')
