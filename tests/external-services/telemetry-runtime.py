@@ -3,6 +3,8 @@
 import importlib.util
 import argparse
 import json
+import os
+import re
 from pathlib import Path
 import secrets
 import signal
@@ -143,9 +145,34 @@ def cleanup(name, created, pod, network=False):
     if failed:raise RuntimeError('Telemetry cleanup incomplete; inspect '+name)
 
 
+def browser_namespace():
+    # Rootful internal bridges do not provide a working published host port.
+    # CI already runs as root: join only this disposable pod's network namespace.
+    return (sys.platform == 'linux' and os.geteuid() == 0 and
+            command('info', '--format', '{{.Host.Security.Rootless}}').strip() == b'false')
+
+
+def browser_command(infra, namespace, index, evidence):
+    prefix = []
+    if namespace:
+        pid = command('inspect', '--format', '{{.State.Pid}}', infra).decode().strip()
+        if not pid.isdecimal() or int(pid) <= 1:
+            raise RuntimeError('Invalid or stopped telemetry infra PID')
+        prefix = ['nsenter', '--target', pid, '--net', '--']
+        origin = 'http://127.0.0.1:8080'
+    else:
+        binding = command('port', infra, '8080/tcp').decode().strip()
+        match = re.fullmatch(r'127[.]0[.]0[.]1:([0-9]+)', binding)
+        if not match or not 0 < int(match[1]) <= 65535:
+            raise RuntimeError('Browser requires one valid loopback port binding')
+        origin = 'http://' + binding
+    return [*prefix, 'node', str(HERE / 'monitoring-browser.cjs'), origin, str(index), str(evidence)]
+
+
 def main(browser=False):
     name='enmaas-transport-'+secrets.token_hex(6)
     created=[];pod=False;network=False
+    namespace = browser and browser_namespace()
     with tempfile.TemporaryDirectory(prefix=name+'-') as temporary:
         root=Path(temporary)
         privacy.obs.configure(root,'127.0.0.1','127.0.0.1','synthetic-client-secret-1234','10.0.0.12')
@@ -171,7 +198,7 @@ def main(browser=False):
         try:
             command('network','create','--internal','--label','io.enmaas.test-lab=transport',name)
             network=True
-            ports=['--publish','127.0.0.1::8080'] if browser else []
+            ports=['--publish','127.0.0.1::8080'] if browser and not namespace else []
             command('pod','create','--name',name,'--network',name,'--label','io.enmaas.test-lab=transport',*ports)
             pod=True
             for filename,content in files.items():
@@ -204,7 +231,7 @@ def main(browser=False):
             details=json.loads(command('pod','inspect',name))
             if isinstance(details,list):details=details[0]
             bindings=details.get('InfraConfig',{}).get('PortBindings') or {}
-            if browser:
+            if browser and not namespace:
                 if set(bindings)!={'8080/tcp'} or any(entry['HostIp']!='127.0.0.1' for entry in bindings['8080/tcp']):
                     raise RuntimeError('browser probe must expose only a loopback Perses port')
             elif bindings:raise RuntimeError('unexpected published port')
@@ -215,10 +242,9 @@ def main(browser=False):
                 prepare.PYTHON,'python3','-B','/lab/probe.py',timeout=240)
             print(result.decode().strip(),flush=True)
             if browser:
-                port=command('port',details['InfraContainerID'],'8080/tcp').decode().strip().rsplit(':',1)[1]
                 index=root/'dashboard-index.json';index.write_bytes(files['dashboard-index.json'])
-                subprocess.run(['node',str(HERE/'monitoring-browser.cjs'),'http://127.0.0.1:'+port,
-                    str(index),str(HERE.parents[1]/'.state/monitoring-browser')],check=True,timeout=240)
+                subprocess.run(browser_command(details['InfraContainerID'], namespace, index,
+                    HERE.parents[1]/'.state/monitoring-browser'),check=True,timeout=240)
         finally:cleanup(name,created,pod,network)
     print('PASS: disposable telemetry pod and secrets removed; no persistent volumes')
 
