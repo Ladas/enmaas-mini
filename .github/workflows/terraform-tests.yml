@@ -1,0 +1,45 @@
+name: Terraform mocked AWS flow
+on:
+  pull_request:
+    paths:
+      - infra/terraform/**
+      - tests/terraform/**
+      - .github/workflows/terraform-tests.yml
+  push:
+    branches: [main]
+    paths:
+      - infra/terraform/**
+      - tests/terraform/**
+      - .github/workflows/terraform-tests.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mock-aws:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      AWS_EC2_METADATA_DISABLED: 'true'
+      TF_IN_AUTOMATION: 'true'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install pinned Terraform
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            -o terraform.zip https://releases.hashicorp.com/terraform/1.14.0/terraform_1.14.0_linux_amd64.zip
+          echo '33ac217458ba8b44ce2813553083bc132c9a07e41a79c2e3627977682d283093  terraform.zip' | sha256sum --check
+          mkdir -p terraform-bin
+          unzip -q terraform.zip terraform -d terraform-bin
+          echo "$RUNNER_TEMP/terraform-bin" >> "$GITHUB_PATH"
+      - name: Validate and test without AWS credentials
+        run: |
+          terraform fmt -check -recursive infra/terraform/aws
+          terraform -chdir=infra/terraform/aws init -backend=false -lockfile=readonly
+          terraform -chdir=infra/terraform/aws validate
+          terraform -chdir=infra/terraform/aws test
+          python3 -m unittest discover -s tests/terraform -v

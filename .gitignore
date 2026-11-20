@@ -11,3 +11,10 @@ __pycache__/
 .worktrees/
 .DS_Store
 docs/examples/*/visual-demo.sheet*.png
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+crash.log
