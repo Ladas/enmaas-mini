@@ -28,6 +28,23 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def directory_rows(fetch_page):
+    """Return every row of the management users listing.
+
+    The published image returns a bare JSON array while the standalone-management
+    source pin returns a paginated {data, has_more} envelope. Accept both shapes
+    and walk every page so cleanup compares against the full directory.
+    """
+    rows, offset = [], 0
+    while True:
+        page = fetch_page(offset)
+        page_rows = page['data'] if isinstance(page, dict) else page
+        rows.extend(page_rows)
+        if not isinstance(page, dict) or not page.get('has_more') or not page_rows:
+            return rows
+        offset += len(page_rows)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--prefix', default='demo-team')
@@ -94,17 +111,9 @@ def main():
         (args.output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     save()
     if args.cleanup:
-        def directory_rows():
-            # The management users listing is paginated ({data, has_more});
-            # walk every page so cleanup compares against the full directory.
-            rows, offset = [], 0
-            while True:
-                page = call('GET', f'/api/v1/management/users?limit=500&offset={offset}')
-                rows.extend(page['data'])
-                if not page['has_more'] or not page['data']:
-                    return rows
-                offset += len(page['data'])
-        profiles = {row['user_id']: row for row in directory_rows()}
+        def users_page(offset):
+            return call('GET', f'/api/v1/management/users?limit=500&offset={offset}')
+        profiles = {row['user_id']: row for row in directory_rows(users_page)}
         for index, user in enumerate(manifest['users']):
             subject = f'{args.prefix}-{index + 1:02d}'
             if (user['subject'] != subject or user['user_id'] not in profiles or
