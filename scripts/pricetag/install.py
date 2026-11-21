@@ -31,7 +31,9 @@ METERING_BRANCH = 'standalone-management'
 PRAXIS_IMAGE = 'quay.io/redhat-services-prod/enmaas-tenant/praxis-ai@sha256:bcc31cac1dbb5316ed57601d13d702997b3f4e3e6ead665c9fe01300e61db00a'
 PRAXIS_REVISION = 'd7ef08cea44bf1114160cb17e7f68189cdf2773e'
 MAAS_IMAGE = 'localhost/pricetag-maas:standalone'
-METERING_IMAGE = 'localhost/pricetag-metering:standalone-e4ba826'
+# Derive the local source-build tag from the pin so a re-pin cannot leave a
+# stale label behind (build-metering derives its standalone default the same way).
+METERING_IMAGE = 'localhost/pricetag-metering:standalone-' + SOURCE_METERING_COMMIT[:7]
 PUBLISHED_MAAS_IMAGE = 'quay.io/redhat-et/secure-single-server-maas-standalone@sha256:0bec6ef57fa5b10a7bef8f4df8d98f932c9d7fc96798f7bfc0cd77b504790fa8'
 PUBLISHED_METERING_IMAGE = 'quay.io/redhat-et/secure-single-server-pricetag-metering@sha256:dabb2f35f54c30c2c387b3bf298b66f3b84a4110ddf3a78a204c7d59c5de2f1a'
 CACHE = Path('/var/cache/pricetag-installer')
@@ -375,7 +377,8 @@ def acquire_images(args, arch):
         run([ROOT / 'scripts/pricetag/build-maas', '--source', CACHE / 'maas',
              '--expected-commit', args.maas_revision, '--platform', 'linux/' + arch], label='Building MaaS')
         run([sys.executable, ROOT / 'scripts/pricetag/build-metering', '--source', CACHE / 'metering',
-             '--revision', args.metering_revision, '--platform', 'linux/' + arch], label='Building PriceTag')
+             '--revision', args.metering_revision, '--tag', METERING_IMAGE,
+             '--platform', 'linux/' + arch], label='Building PriceTag')
         images = (MAAS_IMAGE, METERING_IMAGE)
     else:
         images = (args.maas_image, args.metering_image)

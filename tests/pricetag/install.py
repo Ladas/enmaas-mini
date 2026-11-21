@@ -209,6 +209,32 @@ class InstallTest(unittest.TestCase):
             self.assertTrue(any('--revision' in c and 'b' * 40 in c for c in commands))
             self.assertTrue(any('--expected-commit' in c and 'a' * 40 in c for c in commands))
 
+    def test_source_build_tags_the_metering_image_that_is_imported(self):
+        args = self.image_args('--image-mode', 'source', '--maas-revision', 'a' * 40,
+                               '--metering-revision', 'b' * 40)
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(installer, 'CACHE', Path(directory)), \
+                patch.object(installer, 'checkout'):
+            def execute(command, capture=False, **kwargs):
+                if capture:
+                    if command[-1] == '{{.Architecture}}':
+                        return 'amd64'
+                    return {installer.PRAXIS_IMAGE: installer.PRAXIS_REVISION,
+                            installer.MAAS_IMAGE: args.maas_revision,
+                            installer.METERING_IMAGE: args.metering_revision}[command[3]]
+            with patch.object(installer, 'run', side_effect=execute) as run:
+                images = installer.acquire_images(args, 'amd64')
+            commands = [list(map(str, call.args[0])) for call in run.call_args_list]
+            built = next(command for command in commands if command[1].endswith('build-metering'))
+            self.assertEqual(built[built.index('--tag') + 1], installer.METERING_IMAGE)
+            self.assertEqual(images, (installer.MAAS_IMAGE, installer.METERING_IMAGE))
+            # A standalone build without --tag must still land on the imported
+            # tag, and a --revision override derives its own matching tag.
+            builder = module('build-metering')
+            self.assertEqual(builder.default_tag(builder.REVISION), installer.METERING_IMAGE)
+            self.assertEqual(builder.default_tag('b' * 40),
+                             'localhost/pricetag-metering:standalone-' + 'b' * 7)
+
     def test_build_output_is_private_and_capture_still_returns_values(self):
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(installer, 'LOG', None), patch.object(installer, 'LOG_PATH', None):
