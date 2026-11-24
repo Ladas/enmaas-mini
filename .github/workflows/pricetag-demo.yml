@@ -52,6 +52,24 @@ jobs:
           sudo apparmor_parser --replace tests/pricetag/ci.apparmor
           sudo install -d -m 0755 /etc/containers/containers.conf.d
           printf '[containers]\napparmor_profile="pricetag-demo-ci"\n' | sudo tee /etc/containers/containers.conf.d/99-pricetag-demo.conf >/dev/null
+      - name: Debug registry pull (temporary, remove before merge)
+        continue-on-error: true
+        run: |
+          set -x
+          getent ahosts registry.access.redhat.com | head -6 || true
+          curl -4 -sS -o /dev/null -w 'v4 /v2/: %{http_code}\n' https://registry.access.redhat.com/v2/ || true
+          curl -6 -sS -o /dev/null -w 'v6 /v2/: %{http_code}\n' https://registry.access.redhat.com/v2/ || echo 'v6 /v2/: unreachable'
+          curl -sSI https://registry.access.redhat.com/v2/ 2>/dev/null | grep -i -E '^HTTP/|www-authenticate' || true
+          echo '--- pull amd64 platform digest ---'
+          sudo podman pull registry.access.redhat.com/hi/postgresql@sha256:52e9435300b2fe89f8534e03e86d54179b86a1a4ca29a9c4bd426b000958a4b9 || echo "platform digest pull rc=$?"
+          echo '--- exact postgres_identity container command ---'
+          sudo podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges --entrypoint sh registry.access.redhat.com/hi/postgresql@sha256:52e9435300b2fe89f8534e03e86d54179b86a1a4ca29a9c4bd426b000958a4b9 -c 'id -u postgres; id -g postgres' || echo "identity run rc=$?"
+          sudo podman rmi registry.access.redhat.com/hi/postgresql@sha256:52e9435300b2fe89f8534e03e86d54179b86a1a4ca29a9c4bd426b000958a4b9 >/dev/null 2>&1 || true
+          echo '--- registry-wide control image ---'
+          sudo podman pull registry.access.redhat.com/ubi9/ubi-minimal:latest || echo "ubi9 pull rc=$?"
+          sudo podman rmi registry.access.redhat.com/ubi9/ubi-minimal:latest >/dev/null 2>&1 || true
+          echo '--- index digest control ---'
+          sudo podman pull registry.access.redhat.com/hi/postgresql@sha256:9cca24a10b7d319cf44aa811d3eeda957e14e0b6350e099ccb99f63de005e614 || echo "index digest pull rc=$?"
       - name: Qualify isolated PostgreSQL runtime
         run: sudo python3 tests/pricetag/database-smoke.py
       - name: Build pinned application sources
