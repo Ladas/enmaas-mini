@@ -81,7 +81,10 @@ sudo tests/external-services/install-observability \
 ```
 
 Optional `--issuer-name identity.example.test --issuer-private-ip 10.0.0.10`
-must match the issuer's canonical name and certificate. Routing/DNS must already
+must match the issuer's canonical name and certificate. `--issuer` and
+`--observability` must be RFC1918 addresses; a public issuer address is only
+accepted together with `--issuer-name`/`--issuer-private-ip`, which pins the
+private backchannel instead. Routing/DNS must already
 exist. The installer adjusts firewalld, not cloud security groups. Cloud rules
 must independently allow only the intended browser and private telemetry sources.
 

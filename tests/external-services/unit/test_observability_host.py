@@ -13,7 +13,7 @@ class Host(unittest.TestCase):
     def test_private_issuer_resolution_is_pinned_in_pod_and_preserves_tls(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d)
-            host.configure(root,'192.0.2.10','192.0.2.12','synthetic-secret-123456','10.0.0.12',
+            host.configure(root,'192.0.2.10','192.168.2.12','synthetic-secret-123456','10.0.0.12',
                            issuer_name='identity.lab.example.com',issuer_private_ip='10.0.0.10')
             pod=(root/'quadlets/lab-observability.pod').read_text()
             self.assertIn('AddHost=identity.lab.example.com:10.0.0.10',pod)
@@ -25,7 +25,7 @@ class Host(unittest.TestCase):
 
     def test_only_browser_and_mtls_ports_are_published(self):
         with tempfile.TemporaryDirectory() as d:
-            root=Path(d);host.configure(root,'192.0.2.10','192.0.2.12','synthetic-secret-123456','10.0.0.12')
+            root=Path(d);host.configure(root,'192.168.2.10','192.168.2.12','synthetic-secret-123456','10.0.0.12')
             pod=(root/'quadlets/lab-observability.pod').read_text()
             self.assertIn('PublishPort=8443:8443',pod)
             self.assertIn('PublishPort=10.0.0.12:24443:24443',pod)
@@ -38,8 +38,8 @@ class Host(unittest.TestCase):
                 self.assertIn('DropCapability=all',text)
                 self.assertNotIn('synthetic-secret',text)
             auth=(root/'oauth.cfg').read_text()
-            self.assertIn('https://192.0.2.10:8443/realms/enmaas-lab',auth)
-            self.assertIn('https://192.0.2.12:8443/oauth2/callback',auth)
+            self.assertIn('https://192.168.2.10:8443/realms/enmaas-lab',auth)
+            self.assertIn('https://192.168.2.12:8443/oauth2/callback',auth)
             self.assertIn('provider_ca_files = ["/lab/issuer-ca.pem"]',auth)
             self.assertIn('allowed_groups = ["/observability-admin"]',auth)
             collector=(root/'collector.yaml').read_text()
@@ -50,7 +50,7 @@ class Host(unittest.TestCase):
 
     def test_all_dashboard_assets_are_generated_and_mounted(self):
         with tempfile.TemporaryDirectory() as d:
-            root=Path(d);host.configure(root,'192.0.2.10','192.0.2.12','synthetic-secret-123456','10.0.0.12')
+            root=Path(d);host.configure(root,'192.168.2.10','192.168.2.12','synthetic-secret-123456','10.0.0.12')
             unit=(root/'quadlets/lab-obs-perses.container').read_text()
             for asset in host.lab.PERSES_ASSETS:
                 self.assertTrue((root/asset).is_file(),asset)
@@ -66,14 +66,28 @@ class Host(unittest.TestCase):
         for address in ('0.0.0.0', '127.0.0.1', '169.254.1.1', '8.8.8.8', '::1', '192.0.2.12'):
             with tempfile.TemporaryDirectory() as d:
                 with self.assertRaises(ValueError):
-                    host.configure(Path(d),'192.0.2.10','192.0.2.12',
+                    host.configure(Path(d),'192.168.2.10','192.168.2.12',
                                    'synthetic-secret-123456',address)
                 self.assertFalse(list(Path(d).iterdir()))
+
+    def test_direct_endpoints_must_be_rfc1918_but_named_issuer_may_be_public(self):
+        with tempfile.TemporaryDirectory() as d:
+            for issuer,observability in (('192.0.2.10','192.168.2.12'),('192.168.2.10','192.0.2.12'),
+                                         ('8.8.8.8','192.168.2.12'),('192.168.2.10','8.8.8.8')):
+                with self.assertRaisesRegex(ValueError,'RFC1918'):
+                    host.configure(Path(d),issuer,observability,'synthetic-secret-123456','10.0.0.12')
+                self.assertFalse(list(Path(d).iterdir()))
+            # A named issuer mapping replaces a public issuer address with its
+            # verified private backchannel, so the public address stays allowed.
+            host.configure(Path(d),'192.0.2.10','192.168.2.12','synthetic-secret-123456','10.0.0.12',
+                           issuer_name='identity.lab.example.com',issuer_private_ip='10.0.0.10')
+            auth=(Path(d)/'oauth.cfg').read_text()
+            self.assertIn('https://identity.lab.example.com:8443/realms/enmaas-lab',auth)
 
     def test_installer_requires_binding_to_assigned_private_address(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            host.configure(root,'192.0.2.10','192.0.2.12','synthetic-secret-123456','10.0.0.12')
+            host.configure(root,'192.168.2.10','192.168.2.12','synthetic-secret-123456','10.0.0.12')
             interfaces = [{'addr_info': [{'family': 'inet', 'local': '10.0.0.12'}]}]
             self.assertEqual(host.validate_host_binding(root, interfaces), '10.0.0.12')
             with self.assertRaises(ValueError):
@@ -86,7 +100,7 @@ class Host(unittest.TestCase):
     def test_reject_secret_injection(self):
         with tempfile.TemporaryDirectory() as d:
             for secret in ('short','SECRET\ninvalid=true','"quoted-secret-123456"'):
-                with self.assertRaises(ValueError):host.configure(Path(d),'192.0.2.10','192.0.2.12',secret,'10.0.0.12')
+                with self.assertRaises(ValueError):host.configure(Path(d),'192.168.2.10','192.168.2.12',secret,'10.0.0.12')
             self.assertFalse(list(Path(d).iterdir()))
 
 if __name__=='__main__':unittest.main()

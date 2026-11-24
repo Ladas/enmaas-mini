@@ -14,7 +14,20 @@ import uuid
 
 
 def secure_dir(root):
-    fd=os.open(root,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    """Anchor the population directory against redirected or untrusted parents."""
+    path=Path(root)
+    if not path.is_absolute():path=Path(os.getcwd())/path
+    directory=os.open(path.anchor,os.O_RDONLY|os.O_DIRECTORY)
+    try:
+        for component in path.parts[1:-1]:
+            child=os.open(component,os.O_RDONLY|os.O_DIRECTORY,dir_fd=directory)
+            os.close(directory);directory=child
+            info=os.fstat(directory)
+            if info.st_uid not in (0,os.getuid()) or info.st_mode&0o022 and not info.st_mode&stat.S_ISVTX:
+                raise ValueError('Population directory ancestors must be root/user-owned without unsticky group/world write')
+        final=path.parts[-1] if len(path.parts)>1 else path.anchor
+        fd=os.open(final,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=directory)
+    finally:os.close(directory)
     info=os.fstat(fd)
     if info.st_uid!=os.getuid() or info.st_mode&0o077:
         os.close(fd);raise ValueError('Population directory must be owned by this user and private')

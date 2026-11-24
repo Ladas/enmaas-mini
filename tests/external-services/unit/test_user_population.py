@@ -77,6 +77,18 @@ class Population(unittest.TestCase):
                 with self.assertRaises(BlockingIOError):pop.run(root,Mock(),Mock())
             finally:os.close(fd)
 
+    def test_untrusted_population_ancestors_are_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base=Path(tmp);root=base/'users';pop.initialize(root,1)
+            base.chmod(0o0770)
+            with self.assertRaisesRegex(ValueError,'ancestors'):pop.load(root,'population.json')
+            # Sticky world-writable ancestors (the standard private /tmp shape)
+            # and plain owner-private ancestors both remain acceptable.
+            base.chmod(0o1777)
+            pop.load(root,'population.json')
+            base.chmod(0o700)
+            pop.load(root,'population.json')
+
     def test_export_contains_only_identity_profiles_not_credentials(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)/'users';manifest=pop.initialize(root,2);records=[]

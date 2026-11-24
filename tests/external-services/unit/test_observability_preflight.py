@@ -24,10 +24,10 @@ class Preflight(unittest.TestCase):
                 code=body.split("<<'PY'\n",1)[1].split('\nPY\n',1)[0]
                 code=code.replace('info.st_uid!=0','info.st_uid!=os.getuid()')
                 if installer=='install-observability':
-                    agent.observation.configure(inputs,'192.0.2.1','192.0.2.2','synthetic-client-secret','10.0.0.2')
+                    agent.observation.configure(inputs,'192.168.2.1','192.168.2.2','synthetic-client-secret','10.0.0.2')
                     names=('cert','key','issuer-ca','client-ca')
                     argv=['test',str(HERE/'observability-host.py'),str(inputs)]
-                    tail=['192.0.2.2','10.0.0.1/32','192.0.2.10/32']
+                    tail=['192.168.2.2','10.0.0.1/32','192.0.2.10/32']
                 else:
                     agent.configure(inputs,'10.0.0.2')
                     names=('ca','cert','key');argv=['test',str(inputs)];tail=[]

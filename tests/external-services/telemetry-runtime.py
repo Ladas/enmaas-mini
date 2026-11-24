@@ -20,7 +20,7 @@ import prepare
 spec=importlib.util.spec_from_file_location('query_samples',HERE/'monitoring-samples.py')
 samples=importlib.util.module_from_spec(spec);spec.loader.exec_module(samples)
 
-CLIENT='''import json,math,ssl,time,urllib.request,urllib.parse
+CLIENT='''import json,math,ssl,time,urllib.error,urllib.request,urllib.parse
 from pathlib import Path
 payloads=json.loads(Path('/lab/payloads.json').read_text())
 context=ssl.create_default_context(cafile='/lab/ca.pem')
