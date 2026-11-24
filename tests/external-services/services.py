@@ -33,6 +33,10 @@ ROLES=('keycloak','observability','gateway')
 # Source revision qualified for OIDC and private management APIs; independent of
 # the default published gateway image. Keep aligned with external-auth.md.
 OIDC_METERING_COMMIT='2281e1a84bfc3b998e7db36bc01bae88130bfcdd'
+# The monitoring deployment requires OTLP; the installer default tenant image
+# does not currently include it. Pin the qualified telemetry image explicitly.
+TELEMETRY_PRAXIS_IMAGE='quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8'
+TELEMETRY_PRAXIS_REVISION='5667c4acecd0981ae5114cbbf2ee3dcccec9c248'
 
 
 def validate(config):
@@ -112,6 +116,7 @@ def plan(config):
     command('gateway-install','gateway','python3','scripts/pricetag/install.py','--non-interactive','--yes',
             '--mode','mock','--hostname',public['gateway'],'--no-sample-users','--monthly-usd','5',
             '--image-mode','source','--maas-revision',installer.MAAS_COMMIT,'--metering-revision',OIDC_METERING_COMMIT,
+            '--praxis-image',TELEMETRY_PRAXIS_IMAGE,'--praxis-revision',TELEMETRY_PRAXIS_REVISION,
             '--tls-bundle','/root/enmaas-tls','--oidc-config','/root/enmaas-inputs/oidc.json',*database)
     command('telemetry-prepare','gateway','python3','tests/external-services/telemetry-agent.py',
             '--observability-private-ip',private['observability'],'--output','/root/enmaas-telemetry-inputs')

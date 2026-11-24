@@ -50,6 +50,9 @@ class Services(unittest.TestCase):
         args=s.installer.parse_args(step['argv'][2:]+['--plan'])
         self.assertEqual(args.mode,'mock')
         self.assertEqual(args.metering_revision,'2281e1a84bfc3b998e7db36bc01bae88130bfcdd')
+        self.assertEqual(args.praxis_image,
+            'quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8')
+        self.assertEqual(args.praxis_revision,'5667c4acecd0981ae5114cbbf2ee3dcccec9c248')
 
     def test_access_summary_is_offline_and_scopes_all_commands(self):
         import shlex

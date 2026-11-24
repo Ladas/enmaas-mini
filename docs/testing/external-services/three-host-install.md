@@ -98,7 +98,15 @@ different credentials.
 The pinned metering source is
 [2281e1a](https://github.com/Ladas/pricetag-metering/commit/2281e1a84bfc3b998e7db36bc01bae88130bfcdd),
 matching the [OIDC guide](../../quickstarts/remote-gateway-pricetag/external-auth.md).
-The installer's older default source is not assumed to support this setup.
+The installer's older default metering source is not assumed to support this setup.
+
+For OTLP metrics and traces, the coordinator explicitly selects the pinned
+`quay.io/opendatahub/praxis-experimental` image. The ordinary installer's tenant
+image default is unchanged and currently lacks OTLP export. The offline plan
+shows the selected digest and expected source revision; the installer verifies
+both the image revision label and host architecture before importing it.
+The installer accepts this selection through `--praxis-image` (digest required)
+and `--praxis-revision` (full Git SHA); supply both together in either image mode.
 
 ## Connect and verify
 

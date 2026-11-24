@@ -238,6 +238,42 @@ class InstallTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'source revision'):
                 installer.acquire_images(args, 'amd64')
 
+    def test_praxis_override_requires_digest_and_matching_revision_option(self):
+        image = 'quay.io/example/praxis@sha256:' + 'c' * 64
+        default = self.image_args()
+        self.assertEqual((default.praxis_image, default.praxis_revision),
+                         (installer.PRAXIS_IMAGE, installer.PRAXIS_REVISION))
+        for flags in (['--praxis-image', image], ['--praxis-revision', 'd' * 40],
+                      ['--praxis-image', 'quay.io/example/praxis:latest', '--praxis-revision', 'd' * 40],
+                      ['--praxis-image', image, '--praxis-revision', 'main'],
+                      ['--praxis-image', 'https://user:secret@example.test/praxis@sha256:' + 'c' * 64,
+                       '--praxis-revision', 'd' * 40]):
+            with self.subTest(flags=flags), self.assertRaises(SystemExit):
+                self.image_args(*flags)
+        for mode in ('source', 'published'):
+            args = self.image_args('--image-mode', mode, '--praxis-image', image,
+                                   '--praxis-revision', 'd' * 40)
+            self.assertEqual((args.praxis_image, args.praxis_revision), (image, 'd' * 40))
+
+    def test_praxis_override_is_pulled_and_provenance_checked(self):
+        image = 'quay.io/example/praxis@sha256:' + 'c' * 64
+        args = self.image_args('--praxis-image', image, '--praxis-revision', 'd' * 40)
+        revisions = {image: args.praxis_revision, args.maas_image: args.maas_revision,
+                     args.metering_image: args.metering_revision}
+        def execute(command, capture=False, **kwargs):
+            if capture:
+                return 'amd64' if command[-1] == '{{.Architecture}}' else revisions[command[3]]
+        with patch.object(installer, 'run', side_effect=execute) as runner:
+            installer.acquire_images(args, 'amd64')
+        self.assertTrue(any(c.args[0] == ['podman', 'pull', image] for c in runner.call_args_list))
+        self.assertFalse(any(installer.PRAXIS_IMAGE in c.args[0] for c in runner.call_args_list))
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            installer.install(args)
+        self.assertIn(image, output.getvalue())
+        revisions[image] = 'e' * 40
+        with patch.object(installer, 'run', side_effect=execute), self.assertRaisesRegex(ValueError, 'source revision'):
+            installer.acquire_images(args, 'amd64')
+
     def test_source_revision_overrides_reach_checkout_and_build(self):
         args = self.image_args('--image-mode', 'source', '--maas-revision', 'a' * 40,
                                '--metering-revision', 'b' * 40)
@@ -257,6 +293,32 @@ class InstallTest(unittest.TestCase):
             commands = [list(map(str, call.args[0])) for call in run.call_args_list]
             self.assertTrue(any('--revision' in c and 'b' * 40 in c for c in commands))
             self.assertTrue(any('--expected-commit' in c and 'a' * 40 in c for c in commands))
+
+    def test_selected_praxis_is_imported_and_prepared_by_verified_id(self):
+        from types import SimpleNamespace
+        image = 'quay.io/example/praxis@sha256:' + 'c' * 64
+        args = self.image_args('--praxis-image', image, '--praxis-revision', 'd' * 40)
+        args.plan, args.yes = False, True
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            for name, value in [('preflight', None), ('provider_module', None),
+                                ('collect_providers', []), ('open_log', None),
+                                ('service_prefix', ['service-exec']),
+                                ('acquire_images', (args.maas_image, args.metering_image))]:
+                stack.enter_context(patch.object(installer, name, return_value=value))
+            stack.enter_context(patch.object(installer.platform, 'machine', return_value='x86_64'))
+            stack.enter_context(patch.object(installer.os, 'umask'))
+            stack.enter_context(patch.object(installer.pwd, 'getpwnam', return_value=SimpleNamespace(pw_uid=999999)))
+            stack.enter_context(patch.object(Path, 'glob', return_value=[]))
+            stack.enter_context(patch.object(installer.subprocess, 'run', return_value=SimpleNamespace(returncode=1)))
+            imported = stack.enter_context(patch.object(installer, 'import_image',
+                side_effect=['sha256:' + letter * 64 for letter in 'abc']))
+            runner = stack.enter_context(patch.object(installer, 'run'))
+            installer.install(args)
+        self.assertEqual(imported.call_args_list[0].args, (image, ['service-exec'], 'Praxis'))
+        prepare = next(c.args[0] for c in runner.call_args_list
+                       if str(ROOT / 'scripts/pricetag/prepare.py') in list(map(str, c.args[0])))
+        self.assertEqual(prepare[prepare.index('--praxis-image') + 1], 'sha256:' + 'a' * 64)
 
     def test_build_output_is_private_and_capture_still_returns_values(self):
         with tempfile.TemporaryDirectory() as directory, \
