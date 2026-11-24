@@ -24,6 +24,23 @@ const collectUsers = require('./management-users.cjs');
  // An empty page ends the walk even when has_more is still set.
  assert.deepEqual(await collectUsers(
      async () => ({ok: true, status: 200, json: async () => ({data: [], has_more: true})})), []);
+ // A non-boolean has_more is not a continuation signal: the walk stops after
+ // the page it arrived with instead of requesting further offsets.
+ let malformedCalls = 0;
+ assert.deepEqual(await collectUsers(async () => {
+   malformedCalls++;
+   return {ok: true, status: 200, json: async () => ({data: [{user_id: 'one'}], has_more: 'false'})};
+ }), [{user_id: 'one'}]);
+ assert.equal(malformedCalls, 1);
+ // The default fetcher stays callable detached from its receiver, as page
+ // serialization can invoke it.
+ const originalFetch = globalThis.fetch;
+ globalThis.fetch = async () => ({ok: true, status: 200, json: async () => ({data: [], has_more: false})});
+ try {
+   assert.deepEqual(await collectUsers(), []);
+ } finally {
+   globalThis.fetch = originalFetch;
+ }
  // The published image returns a bare array in a single response.
  const bare = [{user_id: 'one'}, {user_id: 'two'}];
  let calls = 0;

@@ -33,10 +33,8 @@ jobs:
     timeout-minutes: 60
     env:
       MAAS_REVISION: 6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d
-      # Metering builds from the standalone-management branch carrying
-      # redhat-et/pricetag-metering PR #149 (redhat-et main plus the
-      # standalone management layer). Follow main once that pull request
-      # merges.
+      # Metering builds from the pinned revision of redhat-et/pricetag-metering;
+      # main has carried it since PR #149 merged.
       METERING_REVISION: e4ba826d5b1469d7f1167428792e498ffb4d92c7
       MAAS_IMAGE: quay.io/redhat-et/secure-single-server-maas-standalone
       METERING_IMAGE: quay.io/redhat-et/secure-single-server-pricetag-metering
@@ -56,15 +54,23 @@ jobs:
             directory="${RUNNER_TEMP}/${component}-source"
             git init "$directory"
             if [[ "$component" == maas ]]; then
+              # Fetch the reviewed standalone-runtime branch by its explicit
+              # ref and require its tip to equal the pin: branch motion or
+              # deletion fails loudly here instead of relying on
+              # reachable-SHA fetching.
               git -C "$directory" remote add origin https://github.com/Ladas/models-as-a-service.git
-              git -C "$directory" fetch --depth=1 origin "$MAAS_REVISION"
+              if ! git -C "$directory" fetch --depth=1 origin feat/standalone-runtime-minimal; then
+                echo "::error::maas branch feat/standalone-runtime-minimal is not fetchable from Ladas/models-as-a-service; update the pin and the ref" >&2
+                exit 1
+              fi
               git -C "$directory" checkout --detach FETCH_HEAD
-              test "$(git -C "$directory" rev-parse HEAD)" = "$MAAS_REVISION"
+              if [[ "$(git -C "$directory" rev-parse HEAD)" != "$MAAS_REVISION" ]]; then
+                echo "::error::maas revision $MAAS_REVISION is no longer the tip of feat/standalone-runtime-minimal; review and update the pin" >&2
+                exit 1
+              fi
             else
-              # Fetch the immutable pinned commit from the canonical repository.
-              # While PR #149 is open, the standalone-management branch of
-              # redhat-et/pricetag-metering carries this commit and keeps it
-              # reachable; the pin follows main once the pull request merges.
+              # Fetch the immutable pinned commit from the canonical repository;
+              # main has carried it since PR #149 merged.
               git -C "$directory" remote add origin https://github.com/redhat-et/pricetag-metering.git
               if ! git -C "$directory" fetch --depth=1 origin "$METERING_REVISION"; then
                 echo "::error::metering revision $METERING_REVISION is not reachable in redhat-et/pricetag-metering; update the pin to a commit carried by main or the PR branch" >&2
