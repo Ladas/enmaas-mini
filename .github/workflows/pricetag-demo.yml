@@ -52,6 +52,35 @@ jobs:
           sudo apparmor_parser --replace tests/pricetag/ci.apparmor
           sudo install -d -m 0755 /etc/containers/containers.conf.d
           printf '[containers]\napparmor_profile="pricetag-demo-ci"\n' | sudo tee /etc/containers/containers.conf.d/99-pricetag-demo.conf >/dev/null
+      - name: Debug registry pull variants (temporary, remove before merge)
+        continue-on-error: true
+        run: |
+          IMAGE=$(python3 -c "import sys; sys.path.insert(0, 'scripts/pricetag'); import prepare; print(prepare.POSTGRES)")
+          echo "TEMPDBG image=$IMAGE"
+          echo 'TEMPDBG variant A: podman run with implicit pull'
+          for attempt in 1 2 3; do
+            echo "TEMPDBG A attempt $attempt begin $(date -u +%H:%M:%S)"
+            if sudo podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges --entrypoint sh "$IMAGE" -c 'id -u postgres; id -g postgres'; then
+              echo "TEMPDBG A attempt $attempt rc=0"
+            else
+              echo "TEMPDBG A attempt $attempt rc=$?"
+            fi
+            sudo podman rmi "$IMAGE" >/dev/null 2>&1 || true
+          done
+          echo 'TEMPDBG variant B: explicit podman pull then run'
+          for attempt in 1 2; do
+            if sudo podman pull "$IMAGE"; then
+              echo "TEMPDBG B attempt $attempt pull rc=0"
+            else
+              echo "TEMPDBG B attempt $attempt pull rc=$?"
+            fi
+            if sudo podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges --entrypoint sh "$IMAGE" -c 'id -u postgres; id -g postgres'; then
+              echo "TEMPDBG B attempt $attempt run rc=0"
+            else
+              echo "TEMPDBG B attempt $attempt run rc=$?"
+            fi
+            sudo podman rmi "$IMAGE" >/dev/null 2>&1 || true
+          done
       - name: Qualify isolated PostgreSQL runtime
         run: sudo python3 tests/pricetag/database-smoke.py
       - name: Build pinned application sources

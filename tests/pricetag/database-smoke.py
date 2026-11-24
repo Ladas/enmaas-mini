@@ -60,19 +60,6 @@ def main():
                          'arch={{.Host.Arch}} runtime={{.Host.OCIRuntime.Name}} '
                          'apparmor={{.Host.Security.AppArmorEnabled}} '
                          'selinux={{.Host.Security.SELinuxEnabled}}'), flush=True)
-        # TEMPORARY CI DEBUG: capture the swallowed postgres_identity failure.
-        for attempt in range(3):
-            probe = subprocess.run(
-                ['podman', 'run', '--rm', '--network', 'none', '--read-only',
-                 '--cap-drop', 'all', '--security-opt', 'no-new-privileges',
-                 '--entrypoint', 'sh', demo.POSTGRES, '-c',
-                 'id -u postgres; id -g postgres'], text=True,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            print(f'TEMPDBG attempt {attempt + 1}: rc={probe.returncode} '
-                  f'stdout={probe.stdout.strip()!r} '
-                  f'stderr_tail={probe.stderr.strip()[-500:]!r}', flush=True)
-            if probe.returncode == 0:
-                break
         uid, gid = demo.postgres_identity()
         print(f'PostgreSQL account: {uid}:{gid}', flush=True)
         # No host mounts, application data, provider credentials or published
