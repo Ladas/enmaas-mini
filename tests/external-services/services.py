@@ -151,7 +151,9 @@ def access_summary(config):
             '-o','UserKnownHostsFile="'+config['known_hosts']+'"',
             '-o','GlobalKnownHostsFile=/dev/null','-o','UpdateHostKeys=no',
             '-o','ConnectTimeout=10','-o','ForwardAgent=no','-o','ClearAllForwardings=yes','-o','RequestTTY=yes' if interactive else 'RequestTTY=no']
-        command='cd '+shlex.quote(config['repository'])+' && '+shlex.join(['sudo','-n',*argv])
+        # Display only, but executable as printed: the checkout is entered
+        # inside the privileged context, not by the non-root SSH account.
+        command='sudo -n sh -c '+shlex.quote('cd '+shlex.quote(config['repository'])+' && exec '+shlex.join(argv))
         return shlex.join([*options,config['hosts'][role]['ssh'],command])
     return {
         'deployment':config['deployment'],'status':'Configured addresses; live readiness has not been checked',
@@ -182,8 +184,11 @@ def access_summary(config):
 
 def remote(config,role,argv,timeout=60,*,in_repository=True):
     options=transfer.ssh_options(config['ssh_key'],config['known_hosts'])
-    command=shlex.join(['sudo','-n',*argv])
-    if in_repository:command='cd '+shlex.quote(config['repository'])+' && '+command
+    # Enter the checkout inside the privileged context: the non-root SSH
+    # account cannot traverse a root-owned 0700 repository.
+    if in_repository:
+        command='sudo -n sh -c '+shlex.quote('cd '+shlex.quote(config['repository'])+' && exec '+shlex.join(argv))
+    else:command=shlex.join(['sudo','-n',*argv])
     try:
         result=subprocess.run([*options,config['hosts'][role]['ssh'],command],stdin=subprocess.DEVNULL,
                               stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=timeout)

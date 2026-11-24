@@ -72,7 +72,10 @@ class Services(unittest.TestCase):
             self.assertEqual(args[:3],['ssh','-F','/dev/null'])
             self.assertIn('StrictHostKeyChecking=yes',args);self.assertIn('ForwardAgent=no',args)
             self.assertIn('GlobalKnownHostsFile=/dev/null',args);self.assertIn('RequestTTY=no',args)
-            self.assertTrue(args[-1].startswith('cd '+config['repository']+' && sudo -n '))
+            # The checkout is entered inside the privileged context, not by the
+            # non-root SSH account that cannot traverse the root-owned 0700 repo.
+            self.assertTrue(args[-1].startswith('sudo -n sh -c '))
+            self.assertIn('cd '+config['repository']+' && exec ',args[-1])
         self.assertNotIn('--stdout',shlex.split(summary['population_user_1']['metadata'])[-1])
         self.assertIn('--stdout',shlex.split(summary['population_user_1']['inference_key'])[-1])
 
@@ -94,8 +97,8 @@ class Services(unittest.TestCase):
             self.assertIn('ForwardAgent=no',args)
             self.assertEqual(args[-2],config['hosts']['gateway']['ssh'])
             self.assertEqual(shlex.split(args[-1]),
-                ['cd',config['repository'],'&&','sudo','-n','python3',
-                 'scripts/pricetag/providers',*flags])
+                ['sudo','-n','sh','-c','cd '+config['repository']+' && exec python3 '
+                 'scripts/pricetag/providers '+' '.join(flags)])
             self.assertNotIn('--key-file',args[-1])
         self.assertIn('RequestTTY=no',shlex.split(summary['bootstrap_administrator_key']))
 
@@ -190,7 +193,8 @@ class Services(unittest.TestCase):
             self.assertEqual(run.call_args.kwargs['stdin'],s.subprocess.DEVNULL)
             self.assertEqual(run.call_args.kwargs['stdout'],s.subprocess.DEVNULL)
             self.assertEqual(run.call_args.kwargs['stderr'],s.subprocess.DEVNULL)
-            self.assertIn('sudo -n python3',run.call_args.args[0][-1])
+            self.assertIn('sudo -n sh -c',run.call_args.args[0][-1])
+            self.assertIn('exec python3 -c',run.call_args.args[0][-1])
         for result in (Mock(returncode=1),OSError('credential-sentinel'),s.subprocess.TimeoutExpired('credential-sentinel',60)):
             with patch.object(s.transfer,'ssh_options',return_value=['ssh']),patch.object(s.subprocess,'run',side_effect=result if isinstance(result,Exception) else [result]):
                 with self.assertRaises(ValueError) as caught:s.remote(config,'gateway',['true'])

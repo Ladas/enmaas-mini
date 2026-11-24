@@ -67,10 +67,12 @@ class Transport(unittest.TestCase):
             with patch('sys.argv',args),self.assertRaises(ValueError):p.main()
             for extra in (['--yes','--count','0'],['--yes']):
                 with patch('sys.argv',args+extra),patch.object(p.os,'geteuid',return_value=0),patch.object(p.private,'read',return_value={}),self.assertRaises(ValueError):p.main()
-            with patch.object(p.os,'geteuid',return_value=0),patch.object(p.private,'read',return_value={'bootstrap_admin':'credential-sentinel'}),patch.object(p,'Issuer') as issuer,patch.object(p.population,'run',return_value={'issuer_users_verified':2,'pricetag_provisioned':False}):
+            with patch.object(p.os,'geteuid',return_value=0),patch.object(p.private,'read',return_value={'bootstrap_admin':'credential-sentinel'}),patch.object(p,'Issuer') as issuer,patch.object(p.population,'run',return_value={'issuer_users_verified':2,'pricetag_provisioned':False}) as run:
                 for _ in range(2):
                     with patch('sys.argv',args+['--yes']),contextlib.redirect_stdout(io.StringIO()) as out:p.main()
                     self.assertNotIn('credential-sentinel',out.getvalue())
+                # Refreshed authentication is prepared before the creating marker.
+                self.assertIs(run.call_args.kwargs.get('prepare'),issuer.return_value.access_token)
                 export=Path(tmp)/'profiles.json'
                 with patch('sys.argv',args+['--yes','--export',str(export)]),patch.object(p.population,'export_profiles',return_value={'profiles':[]}),contextlib.redirect_stdout(io.StringIO()):
                     p.main()

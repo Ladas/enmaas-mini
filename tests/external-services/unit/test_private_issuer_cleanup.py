@@ -39,6 +39,34 @@ class Cleanup(unittest.TestCase):
         self.assertTrue(all(call.kwargs['timeout']==10 for call in run.call_args_list))
         self.assertEqual(run.call_args_list[-1].args,('network','rm','owned'))
 
+    def test_pending_network_confirmed_absent_is_tolerated(self):
+        with patch.object(p,'command',side_effect=[Mock(returncode=0),Mock(returncode=1),Mock(returncode=1)]) as run:
+            p.cleanup('owned',['owned-secret'],network=True)
+        self.assertEqual(run.call_count,3)
+        self.assertEqual(run.call_args_list[0].args,('secret','rm','--ignore','owned-secret'))
+        self.assertEqual(run.call_args_list[1].args,('network','rm','owned'))
+        self.assertEqual(run.call_args_list[2].args,('network','exists','owned'))
+
+    def test_pending_network_verification_failure_is_not_absence(self):
+        with patch.object(p,'command',side_effect=[Mock(returncode=1),Mock(returncode=125)]) as run:
+            with self.assertRaisesRegex(RuntimeError,'cleanup incomplete'):
+                p.cleanup('owned',[],network=True)
+        self.assertEqual(run.call_count,2)
+        self.assertEqual(run.call_args_list[1].args,('network','exists','owned'))
+
+    def test_sigterm_during_teardown_finishes_every_removal_first(self):
+        import os,signal
+        for signum,code in ((signal.SIGTERM,143),(signal.SIGINT,130)):
+            def terminate_during_removal(*args,**kwargs):
+                os.kill(os.getpid(),signum)
+                return Mock(returncode=0)
+            with patch.object(p,'command',side_effect=terminate_during_removal) as run:
+                with self.assertRaises(SystemExit) as caught:p.cleanup('owned',['owned-secret'],network=True)
+            self.assertEqual(caught.exception.code,code)
+            self.assertEqual(run.call_count,2)
+            self.assertEqual([call.args for call in run.call_args_list],
+                [('secret','rm','--ignore','owned-secret'),('network','rm','owned')])
+
     def test_success_failure_and_timeout_remove_the_exact_ephemeral_client(self):
         for outcome in (Mock(returncode=0,stdout='PASS'),Mock(returncode=1),subprocess.TimeoutExpired('podman',60)):
             with patch.object(p.subprocess,'run',side_effect=[outcome,Mock(returncode=0)]) as run:

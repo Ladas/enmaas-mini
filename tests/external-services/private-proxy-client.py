@@ -54,6 +54,13 @@ def main():
         except urllib.error.HTTPError as error:
             if name=='admin' or error.code!=403:
                 raise RuntimeError('unexpected group authorization result') from None
+            # An issuer-side login failure must not be mistaken for the proxy's
+            # group gate: only the exact proxy callback origin and path proves it.
+            expected=urllib.parse.urlsplit(PROXY+'/oauth2/callback')
+            origin=urllib.parse.urlsplit(getattr(error,'url','') or '')
+            if (origin.scheme,origin.hostname,origin.port,origin.path)!=(
+                    expected.scheme,expected.hostname,expected.port,expected.path):
+                raise RuntimeError('group denial did not originate from the proxy callback') from None
             error.close()
         print('PASS: private OAuth2 Proxy '+name+(' authenticated session accepted' if name=='admin' else ' denied by administrator-group gate'))
     print('PASS: anonymous and forged identity headers cannot authorize the private proxy')

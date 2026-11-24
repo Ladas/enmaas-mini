@@ -12,6 +12,7 @@ from unittest.mock import Mock,patch
 
 spec=importlib.util.spec_from_file_location('import_population',(Path(__file__).resolve().parents[1] / 'import-population.py'))
 p=importlib.util.module_from_spec(spec);spec.loader.exec_module(p)
+ACTIVE=lambda profile:{'user_id':profile['user_id'],'active':True}
 
 
 class Import(unittest.TestCase):
@@ -22,19 +23,27 @@ class Import(unittest.TestCase):
 
     def test_api_receipts_preserve_uuid_and_resume_without_replaying_writes(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root=Path(tmp)/'receipts';doc=self.document();api=Mock(side_effect=lambda profile:profile)
+            root=Path(tmp)/'receipts';doc=self.document();api=Mock(side_effect=ACTIVE)
             result=p.apply(doc,root,api)
             self.assertEqual(result,{'recorded_imports':2,'roles_configured':False,'budgets_configured':False})
             p.apply(doc,root,api);self.assertEqual(api.call_count,2)
             self.assertEqual(api.call_args_list[0].args[0],doc['profiles'][0])
             with self.assertRaises(ValueError):p.apply(self.document(),root,api)
 
+    def test_import_requires_confirmed_activation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)/'receipts';doc=self.document()
+            api=Mock(side_effect=lambda profile:{'user_id':profile['user_id'],'active':False})
+            with self.assertRaises(ValueError):p.apply(doc,root,api)
+            with self.assertRaisesRegex(ValueError,'Uncertain'):p.apply(doc,root,api)
+            self.assertEqual(api.call_count,1)
+
     def test_retirement_requires_confirmed_imports_and_cannot_reactivate(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)/'receipts';doc=self.document();retire=Mock(side_effect=lambda profile:{'user_id':profile['user_id'],'active':False,'keys_revoked':2})
             with self.assertRaises(ValueError):p.apply(doc,root,retire,retire=True)
             retire.assert_not_called();self.assertFalse(root.exists())
-            p.apply(doc,root,lambda profile:profile)
+            p.apply(doc,root,ACTIVE)
             self.assertEqual(p.apply(doc,root,retire,retire=True),{'recorded_retirements':2,'issuer_accounts_removed':False})
             p.apply(doc,root,retire,retire=True);self.assertEqual(retire.call_count,2)
             with self.assertRaises(ValueError):p.apply(doc,root,Mock())
@@ -43,20 +52,20 @@ class Import(unittest.TestCase):
         for result in ({'active':True,'keys_revoked':0},{'active':False,'keys_revoked':True},
                        {'active':False,'keys_revoked':-1}):
             with tempfile.TemporaryDirectory() as tmp:
-                root=Path(tmp)/'receipts';doc=self.document();p.apply(doc,root,lambda profile:profile)
+                root=Path(tmp)/'receipts';doc=self.document();p.apply(doc,root,ACTIVE)
                 retire=Mock(side_effect=lambda profile:dict(result,user_id=profile['user_id']))
                 with self.assertRaises(ValueError):p.apply(doc,root,retire,retire=True)
                 with self.assertRaises(ValueError):p.apply(doc,root,retire,retire=True)
                 self.assertEqual(retire.call_count,1)
         with tempfile.TemporaryDirectory() as tmp:
-            root=Path(tmp)/'receipts';doc=self.document();p.apply(doc,root,lambda profile:profile)
+            root=Path(tmp)/'receipts';doc=self.document();p.apply(doc,root,ACTIVE)
             (root/(doc['profiles'][0]['user_id']+'.json')).unlink()
             with self.assertRaises(ValueError):p.apply(doc,root,Mock(),retire=True)
 
     def test_all_key_cleanup_checks_identity_and_suspension_before_revoking(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)/'receipts';doc=self.document()
-            p.apply(doc,root,lambda profile:profile)
+            p.apply(doc,root,ACTIVE)
             with self.assertRaises(ValueError):p.clear_keys(doc,root,Mock(),execute=True)
             p.apply(doc,root,lambda profile:{'user_id':profile['user_id'],'active':False,'keys_revoked':0},retire=True)
             users=[{'user_id':profile['user_id'],'active':False,'logins':[profile['tags']['email']]} for profile in doc['profiles']]
@@ -80,7 +89,7 @@ class Import(unittest.TestCase):
                     {'count':0,'dry_run':True},RuntimeError('credential-sentinel')):
             with tempfile.TemporaryDirectory() as tmp:
                 root=Path(tmp)/'receipts';doc=self.document()
-                p.apply(doc,root,lambda profile:profile)
+                p.apply(doc,root,ACTIVE)
                 p.apply(doc,root,lambda profile:dict(user_id=profile['user_id'],active=False,keys_revoked=0),retire=True)
                 users=[dict(user_id=x['user_id'],active=False,logins=[x['tags']['email']]) for x in doc['profiles']]
                 api=Mock(side_effect=[users,bad])
@@ -91,7 +100,7 @@ class Import(unittest.TestCase):
                 self.assertEqual(retry.call_count,1)
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)/'receipts';doc=self.document()
-            p.apply(doc,root,lambda profile:profile)
+            p.apply(doc,root,ACTIVE)
             p.apply(doc,root,lambda profile:dict(user_id=profile['user_id'],active=False,keys_revoked=0),retire=True)
             with self.assertRaises(ValueError):p.clear_keys(self.document(),root,Mock())
             with self.assertRaises(ValueError):p.clear_keys(doc,root,Mock(return_value={}))
@@ -102,7 +111,7 @@ class Import(unittest.TestCase):
     def test_population_access_uses_existing_user_identity_and_preserves_finite_keys(self):
         from datetime import datetime,timedelta,timezone
         with tempfile.TemporaryDirectory() as tmp:
-            root=Path(tmp)/'receipts';doc=self.document();p.apply(doc,root,lambda profile:profile)
+            root=Path(tmp)/'receipts';doc=self.document();p.apply(doc,root,ACTIVE)
             users=[dict(user_id=x['user_id'],active=True,role='user',logins=[x['tags']['email']]) for x in doc['profiles']]
             expires=(datetime.now(timezone.utc)+timedelta(hours=24)).isoformat()
             key=lambda n:dict(id='key-'+str(n),key='synthetic-private-key-'+str(n),expirationDate=expires)
@@ -117,7 +126,8 @@ class Import(unittest.TestCase):
             self.assertTrue(all(call.args[1] in ('users','budgets','keys') for call in api.call_args_list))
             budgets=[dict(scope='user',principal=x['tags']['email'],monthly_usd=5) for x in doc['profiles']]
             repeated=Mock(side_effect=[users,budgets])
-            self.assertEqual(p.configure_access(doc,root,repeated),result)
+            reuse=Mock(side_effect=[[{'id':'key-1','status':'active'}],[{'id':'key-2','status':'active'}]])
+            self.assertEqual(p.configure_access(doc,root,repeated,list_keys=reuse),result)
             self.assertEqual(repeated.call_count,2)
             with self.assertRaises(ValueError):p.configure_access(doc,root,Mock(side_effect=[users,budgets]),monthly_usd=6)
             badusers=[dict(users[0],role='super_admin'),users[1]]
@@ -134,7 +144,7 @@ class Import(unittest.TestCase):
             with self.assertRaises(ValueError):p.configure_access(self.document(),Path('/missing'),Mock(),monthly_usd=value)
         with self.assertRaises(ValueError):p.configure_access(self.document(),Path('/missing'),Mock(),key_lifetime='forever')
         with tempfile.TemporaryDirectory() as tmp:
-            root=Path(tmp)/'receipts';doc=self.document();p.apply(doc,root,lambda profile:profile)
+            root=Path(tmp)/'receipts';doc=self.document();p.apply(doc,root,ACTIVE)
             with self.assertRaises(ValueError):p.configure_access(self.document(),root,Mock())
             users=[dict(user_id=x['user_id'],active=True,role='user',logins=[x['tags']['email']]) for x in doc['profiles']]
             for bad in (None,[None],[dict(users[0],logins=None)],[],users+[users[0]],
@@ -162,7 +172,7 @@ class Import(unittest.TestCase):
         for budget,key_result in cases:
             with tempfile.TemporaryDirectory() as tmp:
                 root=Path(tmp)/'receipts';doc=self.document();doc['profiles']=doc['profiles'][:1]
-                p.apply(doc,root,lambda profile:profile)
+                p.apply(doc,root,ACTIVE)
                 profile=doc['profiles'][0];users=[dict(user_id=profile['user_id'],active=True,role='user',logins=[profile['tags']['email']])]
                 api=Mock(side_effect=[users,[],budget,key_result])
                 with self.assertRaises(ValueError) as caught:p.configure_access(doc,root,api,key_lifetime='1h',list_keys=Mock(return_value=[]))
@@ -177,7 +187,7 @@ class Import(unittest.TestCase):
                              ([{'id':'key-1','status':'active','expirationDate':(datetime.now(timezone.utc)+timedelta(hours=1)).isoformat()}],True)):
             with tempfile.TemporaryDirectory() as tmp:
                 root=Path(tmp)/'receipts';doc=self.document();doc['profiles']=doc['profiles'][:1]
-                p.apply(doc,root,lambda profile:profile);profile=doc['profiles'][0]
+                p.apply(doc,root,ACTIVE);profile=doc['profiles'][0]
                 users=[dict(user_id=profile['user_id'],active=True,role='user',logins=[profile['tags']['email']])]
                 api=Mock(side_effect=[users,[],{'updated':True},{'id':'key-1','key':'private-sentinel'}])
                 with patch.object(p.oidc,'list_keys',return_value=rows) as readback:
@@ -190,7 +200,7 @@ class Import(unittest.TestCase):
         from datetime import datetime,timedelta,timezone
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)/'receipts';doc=self.document();doc['profiles']=doc['profiles'][:1]
-            p.apply(doc,root,lambda profile:profile)
+            p.apply(doc,root,ACTIVE)
             profile=doc['profiles'][0];identity=profile['user_id'];login=profile['tags']['email']
             users=[dict(user_id=identity,active=True,role='user',logins=[login])]
             expires=(datetime.now(timezone.utc)+timedelta(hours=24)).isoformat()
@@ -200,6 +210,22 @@ class Import(unittest.TestCase):
             api=Mock(side_effect=[users,[dict(scope='user',principal=login,monthly_usd=5)]])
             with self.assertRaises(ValueError):p.configure_access(doc,root,api)
             self.assertEqual(api.call_count,2)
+
+    def test_revoked_recorded_key_requires_reconciliation_without_replacement(self):
+        from datetime import datetime,timedelta,timezone
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)/'receipts';doc=self.document();doc['profiles']=doc['profiles'][:1]
+            p.apply(doc,root,ACTIVE)
+            profile=doc['profiles'][0];identity=profile['user_id'];login=profile['tags']['email']
+            users=[dict(user_id=identity,active=True,role='user',logins=[login])]
+            expires=(datetime.now(timezone.utc)+timedelta(hours=24)).isoformat()
+            api=Mock(side_effect=[users,[],{'updated':True},
+                {'id':'key-1','key':'private-sentinel','expirationDate':expires}])
+            p.configure_access(doc,root,api)
+            revoked=Mock(side_effect=[users,[dict(scope='user',principal=login,monthly_usd=5)]])
+            with self.assertRaisesRegex(ValueError,'no longer active'):
+                p.configure_access(doc,root,revoked,list_keys=Mock(return_value=[{'id':'key-1','status':'revoked'}]))
+            self.assertEqual(revoked.call_count,2)
 
     def test_uncertain_api_stops_and_does_not_retry_or_continue(self):
         for response in (ValueError('credential-sentinel'),{'user_id':str(uuid.uuid4())},None):

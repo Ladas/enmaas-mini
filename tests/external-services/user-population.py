@@ -82,8 +82,12 @@ def manifest(root):
     return manifest
 
 
-def run(root,create_user,inspect_user):
+def run(root,create_user,inspect_user,prepare=None):
     """Callbacks must return the created canonical UUID and a verified user object.
+
+    prepare, when provided, must finish authenticated request preparation before
+    the creating marker is saved; its failure leaves the record retryable
+    instead of uncertain.
 
     Errors intentionally omit callback diagnostics, which may contain credentials.
     This creates issuer identities only; it does not configure roles or PriceTag.
@@ -108,10 +112,13 @@ def run(root,create_user,inspect_user):
             if record['state']=='creating':raise ValueError('Creation outcome uncertain; reconcile the private record before continuing')
             if record['state']=='prepared':
                 if record['user_id'] is not None:raise ValueError('Prepared user already has an identity')
-                record['state']='creating';save(root,name,record)
                 profile={'username':username,'email':username+'@example.test','enabled':True,'emailVerified':True,
                     'firstName':'Synthetic','lastName':'User','groups':[],
                     'credentials':[{'type':'password','value':record['password'],'temporary':False}]}
+                if prepare is not None:
+                    try:prepare()
+                    except Exception:raise ValueError('Creation preparation failed; no submission was attempted') from None
+                record['state']='creating';save(root,name,record)
                 try:
                     identity=create_user(profile)
                     if not isinstance(identity,str) or str(uuid.UUID(identity))!=identity:raise ValueError('Invalid identity')

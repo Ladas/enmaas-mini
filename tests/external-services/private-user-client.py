@@ -89,7 +89,7 @@ def main():
             root=Path(temporary)/'population';population.initialize(root,count)
             started=time.monotonic()
             PROGRESS['stage']='create'
-            first=population.run(root,create_user,inspect_user)
+            first=population.run(root,create_user,inspect_user,prepare=admin.access_token)
             timings['create_seconds']=round(time.monotonic()-started,3);started=time.monotonic()
             PROGRESS.update(stage='verify',verified=0)
             second=population.run(root,create_user,inspect_user)

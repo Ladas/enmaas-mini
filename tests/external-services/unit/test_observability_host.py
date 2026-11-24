@@ -73,7 +73,8 @@ class Host(unittest.TestCase):
     def test_direct_endpoints_must_be_rfc1918_but_named_issuer_may_be_public(self):
         with tempfile.TemporaryDirectory() as d:
             for issuer,observability in (('192.0.2.10','192.168.2.12'),('192.168.2.10','192.0.2.12'),
-                                         ('8.8.8.8','192.168.2.12'),('192.168.2.10','8.8.8.8')):
+                                         ('8.8.8.8','192.168.2.12'),('192.168.2.10','8.8.8.8'),
+                                         ('127.0.0.2','192.168.2.12'),('192.168.2.10','127.0.0.2')):
                 with self.assertRaisesRegex(ValueError,'RFC1918'):
                     host.configure(Path(d),issuer,observability,'synthetic-secret-123456','10.0.0.12')
                 self.assertFalse(list(Path(d).iterdir()))
@@ -83,6 +84,10 @@ class Host(unittest.TestCase):
                            issuer_name='identity.lab.example.com',issuer_private_ip='10.0.0.10')
             auth=(Path(d)/'oauth.cfg').read_text()
             self.assertIn('https://identity.lab.example.com:8443/realms/enmaas-lab',auth)
+        # The local lab runs every service on the host loopback; embedded
+        # 127.0.0.1 endpoints stay acceptable while the collector binding does not.
+        with tempfile.TemporaryDirectory() as d:
+            host.configure(Path(d),'127.0.0.1','127.0.0.1','synthetic-secret-123456','10.0.0.12')
 
     def test_installer_requires_binding_to_assigned_private_address(self):
         with tempfile.TemporaryDirectory() as d:

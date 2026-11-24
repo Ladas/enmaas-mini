@@ -76,18 +76,31 @@ def command(*args,input=None,check=True,timeout=60):
 
 
 def cleanup(name, created, *, proxy=False, container=False, network=False):
-    operations=[]
-    if proxy:operations.append(('rm','--force','--ignore',name+'-proxy'))
-    if container:operations.append(('rm','--force','--ignore',name))
-    operations.extend(('secret','rm',secret) for secret in reversed(created))
-    if network:operations.append(('network','rm',name))
-    failed=False
-    for operation in operations:
-        try:
-            result=command(*operation,check=False,timeout=10)
-            failed |= result.returncode != 0
-        except (subprocess.TimeoutExpired,OSError):failed=True
-    if failed:raise RuntimeError('Disposable issuer cleanup incomplete; inspect resources named '+name)
+    """Complete every bounded removal even if SIGTERM/SIGINT arrives during teardown."""
+    cancelled=[]
+    def defer(signum,*_):cancelled.append(signum)
+    previous={signum:signal.signal(signum,defer) for signum in (signal.SIGTERM,signal.SIGINT)}
+    try:
+        operations=[]
+        if proxy:operations.append(('rm','--force','--ignore',name+'-proxy'))
+        if container:operations.append(('rm','--force','--ignore',name))
+        operations.extend(('secret','rm','--ignore',secret) for secret in reversed(created))
+        if network:operations.append(('network','rm',name))
+        failed=False
+        for operation in operations:
+            try:
+                result=command(*operation,check=False,timeout=10)
+                # A pending name whose creation never committed is confirmed
+                # absent: only exit 1 from network exists proves absence, any
+                # other nonzero is an operational error.
+                if result.returncode and not (operation[0]=='network'
+                        and command('network','exists',name,check=False,timeout=10).returncode==1):
+                    failed=True
+            except (subprocess.TimeoutExpired,OSError):failed=True
+        if failed:raise RuntimeError('Disposable issuer cleanup incomplete; inspect resources named '+name)
+    finally:
+        for signum,handler in previous.items():signal.signal(signum,handler)
+    if cancelled:raise SystemExit(128+cancelled[0])
 
 
 def report_population_failure(output):
@@ -145,10 +158,15 @@ def main(keycloak=False,provisioning=False,population_count=2):
             for suffix in ('credentials.json','identities.json'):
                 material[suffix]=(root/'realm-inputs'/suffix).read_text()
         try:
-            command('network','create','--internal','--label',label,name);network=True
+            # Record each pending name before its creation so an interruption
+            # between commit and bookkeeping still cleans up; removal tolerates
+            # a confirmed absence for creations that never committed.
+            network=True
+            command('network','create','--internal','--label',label,name)
             for suffix,value in material.items():
                 secret=name+'-'+suffix
-                command('secret','create','--label',label,secret,'-',input=value);created.append(secret)
+                created.append(secret)
+                command('secret','create','--label',label,secret,'-',input=value)
             options=['--pull=never','--network',name,'--read-only','--cap-drop','ALL',
                      '--security-opt','no-new-privileges','--user','1001:1001','--memory','128m','--pids-limit','64']
             mounts=[]

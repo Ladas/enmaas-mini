@@ -26,6 +26,16 @@ def private_address(value):
     return str(address)
 
 
+def endpoint_address(value):
+    address = ipaddress.IPv4Address(value)
+    # Only the host loopback itself reaches the lab services: other 127/8
+    # addresses resolve to each consuming container, not the shared network.
+    if not any(address in ipaddress.IPv4Network(network) for network in
+               ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '127.0.0.1/32')):
+        raise ValueError('issuer and observability endpoints require an RFC1918 or host-loopback IPv4 address')
+    return str(address)
+
+
 def validate_host_binding(root, interfaces):
     bindings = [line.split('=', 1)[1] for line in
                 (root/'quadlets/lab-observability.pod').read_text().splitlines()
@@ -47,11 +57,12 @@ def validate_host_binding(root, interfaces):
 
 def configure(root,issuer,observability,client_secret,private_ip,*,issuer_name=None,issuer_private_ip=None):
     private_ip = private_address(private_ip)
-    # Directly embedded endpoints must stay on private networks; a named issuer
-    # mapping replaces the address with its verified RFC1918 backchannel instead.
-    observability = private_address(observability)
+    # Directly embedded endpoints must stay off public networks; the local lab
+    # runs on the host loopback and a named issuer mapping replaces the address
+    # with its verified RFC1918 backchannel instead.
+    observability = endpoint_address(observability)
     issuer,mapping=identity.resolve(issuer,issuer_name,issuer_private_ip)
-    if mapping is None: issuer = private_address(issuer)
+    if mapping is None: issuer = endpoint_address(issuer)
     if not 16<=len(client_secret)<=4096 or any(not 33<=ord(c)<=126 or c in '\\"' for c in client_secret):
         raise ValueError('invalid confidential-client secret; use visible ASCII without quotes/backslashes')
     if any(root.iterdir()):raise FileExistsError('use a new empty output directory')
@@ -114,8 +125,8 @@ def configure(root,issuer,observability,client_secret,private_ip,*,issuer_name=N
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--issuer',required=True,help='RFC1918 issuer address, or any issuer address together with --issuer-name')
-    parser.add_argument('--observability',required=True,help='RFC1918 observability host address')
+    parser.add_argument('--issuer',required=True,help='RFC1918 or 127.0.0.1 issuer address, or any issuer address together with --issuer-name')
+    parser.add_argument('--observability',required=True,help='RFC1918 or 127.0.0.1 observability host address')
     parser.add_argument('--private-ip',required=True,help='private interface address for mTLS ingestion')
     parser.add_argument('--client-secret-file',type=Path,required=True)
     parser.add_argument('--issuer-name',help='canonical issuer DNS name; requires --issuer-private-ip')

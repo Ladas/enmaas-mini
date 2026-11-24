@@ -36,6 +36,23 @@ class Population(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'uncertain'):pop.run(root,create,Mock())
             self.assertEqual(create.call_count,1);self.assertFalse((root/'00002.json').exists())
 
+    def test_preparation_failure_before_the_marker_stays_retryable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)/'users';pop.initialize(root,1)
+            prepare=Mock(side_effect=OSError('token refresh failed'))
+            create=Mock()
+            with self.assertRaisesRegex(ValueError,'preparation'):
+                pop.run(root,create,Mock(),prepare=prepare)
+            prepare.assert_called_once();create.assert_not_called()
+            self.assertEqual(pop.load(root,'00001.json')['state'],'prepared')
+            # After authentication recovers the same record is submitted and resumes.
+            identity=str(uuid.uuid4());settings=pop.manifest(root)
+            username=settings['prefix']+'-00001'
+            create=Mock(return_value=identity)
+            self.assertEqual(pop.run(root,create,lambda uid:{'id':uid,'username':username,'enabled':True},prepare=Mock()),
+                {'issuer_users_verified':1,'pricetag_provisioned':False})
+            self.assertEqual(create.call_count,1)
+
     def test_created_identity_is_rechecked_after_failed_read_without_recreation(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)/'users';pop.initialize(root,1);identity=str(uuid.uuid4())

@@ -89,13 +89,18 @@ def main():
     client=Issuer(args.ca,{'grant_type':'password','client_id':'admin-cli','username':'lab-bootstrap','password':password})
     # Authenticate before allocating a population; failure leaves no new records.
     client.access_token()
+    # Preflight the export destination before any users are created; keep the
+    # final exclusive write for a destination that only appears later.
+    if args.export:
+        directory=population.secure_dir(args.export.parent);os.close(directory)
+        if args.export.exists() or args.export.is_symlink():
+            raise FileExistsError('Export destination already exists; refuse to overwrite')
     if args.state.exists() or args.state.is_symlink():
         if population.load(args.state,'population.json')['count']!=args.count:
             raise ValueError('Population count differs; do not recreate existing identities')
     else:population.initialize(args.state,args.count)
-    result=population.run(args.state,client.create_user,client.inspect_user)
+    result=population.run(args.state,client.create_user,client.inspect_user,prepare=client.access_token)
     if args.export:
-        directory=population.secure_dir(args.export.parent);os.close(directory)
         population.save(args.export.parent,args.export.name,population.export_profiles(args.state),exclusive=True)
         result['identity_export']=str(args.export)
     print(json.dumps({**result,'private_state':str(args.state)},indent=2))

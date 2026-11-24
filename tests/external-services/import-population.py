@@ -71,6 +71,7 @@ def apply(document,root,provision,*,retire=False):
             try:
                 result=provision(profile)
                 if not isinstance(result,dict) or result.get('user_id')!=identity:raise ValueError('Identity mismatch')
+                if not retire and result.get('active') is not True:raise ValueError('Activation not confirmed')
                 if retire and (result.get('active') is not False or type(result.get('keys_revoked')) is not int or result['keys_revoked']<0):
                     raise ValueError('Deactivation/key revocation not confirmed')
             except Exception:
@@ -200,6 +201,10 @@ def configure_access(document,root,management,*,monthly_usd=5,key_lifetime='24h'
                             or not 1<len(raw)<=4097 or not raw.endswith(b'\n')
                             or hashlib.sha256(raw).hexdigest()!=receipt['key_sha256']):
                         raise ValueError('Saved key must remain a private regular file')
+                listed=(oidc.list_keys if list_keys is None else list_keys)(profile)
+                matches=[row for row in listed if isinstance(row,dict) and row.get('id')==receipt['key_id']]
+                if len(matches)!=1 or str(matches[0].get('status','')).lower()!='active':
+                    raise ValueError('Recorded key is no longer active; reconcile without issuing a replacement')
                 continue
             if login in indexed:raise ValueError('Existing budget has no matching setup receipt; reconcile first')
             state.save(root,name,{'state':'configuring','user_id':identity},exclusive=True)
