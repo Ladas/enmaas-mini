@@ -9,7 +9,6 @@ import os
 from pathlib import Path
 import secrets
 import stat
-import tempfile
 import uuid
 
 
@@ -35,17 +34,22 @@ def secure_dir(root):
 
 
 def save(root,name,value,exclusive=False):
+    """Write anchored to the validated directory: no path-based operations."""
     raw=(json.dumps(value,sort_keys=True)+'\n').encode()
-    fd,tmp=tempfile.mkstemp(prefix='.population-',dir=root)
+    directory=secure_dir(root)
     try:
-        with os.fdopen(fd,'wb') as stream:
-            stream.write(raw);stream.flush();os.fsync(stream.fileno())
-        if exclusive:os.link(tmp,root/name,follow_symlinks=False)
-        else:os.replace(tmp,root/name)
-        directory=secure_dir(root)
-        try:os.fsync(directory)
-        finally:os.close(directory)
-    finally:Path(tmp).unlink(missing_ok=True)
+        tmp='.population-'+secrets.token_hex(8)
+        fd=os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600,dir_fd=directory)
+        try:
+            with os.fdopen(fd,'wb') as stream:
+                stream.write(raw);stream.flush();os.fsync(stream.fileno())
+            if exclusive:os.link(tmp,name,src_dir_fd=directory,dst_dir_fd=directory,follow_symlinks=False)
+            else:os.replace(tmp,name,src_dir_fd=directory,dst_dir_fd=directory)
+            os.fsync(directory)
+        finally:
+            try:os.unlink(tmp,dir_fd=directory)
+            except FileNotFoundError:pass
+    finally:os.close(directory)
 
 
 def load(root,name):

@@ -36,6 +36,12 @@ class Population(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'uncertain'):pop.run(root,create,Mock())
             self.assertEqual(create.call_count,1);self.assertFalse((root/'00002.json').exists())
 
+    def test_save_rejects_invalid_directories_before_any_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)/'users';root.mkdir(mode=0o755)
+            with self.assertRaises(ValueError):pop.save(root,'00001.json',{'state':'prepared'})
+            self.assertEqual(list(root.iterdir()),[])
+
     def test_preparation_failure_before_the_marker_stays_retryable(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)/'users';pop.initialize(root,1)

@@ -81,11 +81,14 @@ sudo tests/external-services/install-observability \
 ```
 
 Optional `--issuer-name identity.example.test --issuer-private-ip 10.0.0.10`
-must match the issuer's canonical name and certificate. `--issuer` and
-`--observability` must be RFC1918 addresses or the host loopback `127.0.0.1`,
-which the local lab uses; a public issuer address is only accepted together
-with `--issuer-name`/`--issuer-private-ip`, which pins the private backchannel
-instead. Routing/DNS must already
+must match the issuer's canonical name and certificate. `--issuer` is the
+proxy's backchannel to the issuer and must be an RFC1918 address or the host
+loopback `127.0.0.1` (which the local lab uses); any issuer address is
+accepted together with `--issuer-name`/`--issuer-private-ip`, which pins the
+private backchannel instead. `--observability` is the browser-facing endpoint:
+use the address the workstation uses to reach this host, public or private;
+firewall rules must independently admit only the workstation. Routing/DNS must
+already
 exist. The installer adjusts firewalld, not cloud security groups. Cloud rules
 must independently allow only the intended browser and private telemetry sources.
 
