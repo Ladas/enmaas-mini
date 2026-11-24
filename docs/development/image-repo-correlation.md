@@ -22,7 +22,7 @@ workflows, Quay tag patterns and the EnMaaS-opps README; verified 2026-11-12.
 | --- | --- | --- | --- |
 | `quay.io/redhat-et/secure-single-server-maas-standalone@sha256:0bec6ef5…` (rev `6ac4c80`) | `Ladas/models-as-a-service` branch `feat/standalone-runtime-minimal` | `redhat-et/enmaas-mini` CI: `.github/workflows/pricetag-images.yml` fetches the pinned fork revision, builds with `scripts/pricetag/build-maas` | current maas pin |
 | `quay.io/redhat-et/secure-single-server-pricetag-metering@sha256:dabb2f35…` (rev `ce9c6c51`) | `redhat-et/pricetag-metering` branch `standalone-management` — redhat-et main plus the standalone management layer ([PR #149](https://github.com/redhat-et/pricetag-metering/pull/149)) | same workflow, via `scripts/pricetag/build-metering` and `configs/pricetag/Containerfile.metering` | current metering pin (predates the repoint — it is the earlier Ladas-fork build); the workflow and installer source constants now build `e4ba826` |
-| `registry.access.redhat.com/hi/postgresql@sha256:9cca24a1…` (`17.12-fips`) | upstream PostgreSQL | Red Hat `hi/postgresql` (hummingbird) images; anonymous pull, no registry login | metering/maas database |
+| `registry.access.redhat.com/hi/postgresql@sha256:52e94353…` (`17.12-fips`, per-arch manifests; arm64 `sha256:f097ed32…`) | upstream PostgreSQL | Red Hat `hi/postgresql` (hummingbird) images; anonymous pull, no registry login | metering/maas database |
 
 ## Not yet published
 

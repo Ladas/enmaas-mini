@@ -19,7 +19,7 @@ app-sre-prod and app-sre-stage environments; they require Quay credentials with
 | Praxis gateway | `quay.io/opendatahub/praxis-experimental@sha256:502f120f…` (praxis-proxy/experimental line, rev `5667c4ac`) | `quay.io/redhat-services-prod/enmaas-tenant/praxis-ai@sha256:bcc31cac…` (redhat-et/praxis-ai line, rev `d7ef08ce`) | Switched |
 | Metering | `quay.io/redhat-et/secure-single-server-pricetag-metering@sha256:dabb2f35…` | `quay.io/redhat-services-prod/enmaas-tenant/metering-service@sha256:4c2d485a…` | Unblocked — the standalone management layer is [PR #149](https://github.com/redhat-et/pricetag-metering/pull/149); this repository builds and deploys that source (validated 2026-11-12), and the tenant digest swap lands when the PR merges and Konflux rebuilds |
 | MaaS | `quay.io/redhat-et/secure-single-server-maas-standalone@sha256:0bec6ef5…` | `quay.io/enmaas/maas-api@sha256:bbf5b77a…` | Blocked — no standalone mode upstream (see below) |
-| PostgreSQL | `registry.access.redhat.com/hi/postgresql@sha256:9cca24a1…` (`17.12-fips`) | CNPG cluster / RDS (Kubernetes-specific) | Not applicable |
+| PostgreSQL | `registry.access.redhat.com/hi/postgresql@sha256:52e94353…` (`17.12-fips`, per-arch manifests) | CNPG cluster / RDS (Kubernetes-specific) | Not applicable |
 
 The `quay.io/modden/*` images used by the non-AppSRE EnMaaS-opps environments
 are private to that namespace; the `enmaas-tenant` mirrors build from the same

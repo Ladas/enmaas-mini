@@ -2,11 +2,20 @@
 """Run PriceTag Go tests with isolated PostgreSQL, without deployment credentials."""
 import argparse
 from pathlib import Path
+import platform
 import subprocess
 import time
 import uuid
 
-POSTGRES = 'registry.access.redhat.com/hi/postgresql@sha256:9cca24a10b7d319cf44aa811d3eeda957e14e0b6350e099ccb99f63de005e614'
+# 17.12-fips pinned per architecture: registry.access.redhat.com fails
+# manifest-list pulls with unauthorized blob errors on older Podman (CI's
+# Ubuntu 24.04 ships 4.9.3). 'arm64' mirrors 'aarch64' for macOS hosts.
+POSTGRES_ARCHES = {
+    'x86_64': 'registry.access.redhat.com/hi/postgresql@sha256:52e9435300b2fe89f8534e03e86d54179b86a1a4ca29a9c4bd426b000958a4b9',
+    'aarch64': 'registry.access.redhat.com/hi/postgresql@sha256:f097ed322c237e6f955ce24fbe503a4cd46b58ce9cde1677aca2586ebd08bf2c',
+    'arm64': 'registry.access.redhat.com/hi/postgresql@sha256:f097ed322c237e6f955ce24fbe503a4cd46b58ce9cde1677aca2586ebd08bf2c',
+}
+POSTGRES = POSTGRES_ARCHES[platform.machine()]
 GOLANG = 'docker.io/library/golang@sha256:0f063af2d465d8dcae54cce04278ada488b96f77b42449c8d071e47d016cc65a'
 
 
