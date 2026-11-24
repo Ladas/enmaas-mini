@@ -28,6 +28,55 @@ benchmark = module('benchmark')
 
 
 class InstallTest(unittest.TestCase):
+    def test_explicit_headless_does_not_prompt_on_a_tty(self):
+        for mode, provider_flags in (
+            ('mock', []),
+            ('real', ['--provider', 'openai', '--openai-key-file', '/root/provider.key']),
+            ('real', ['--provider', 'external', '--external-api', 'both',
+                      '--external-key-file', '/root/provider.key',
+                      '--external-openai-url', 'https://provider.example/v1',
+                      '--external-messages-url', 'https://provider.example']),
+        ):
+            with self.subTest(mode=mode, provider=provider_flags), \
+                    patch.object(installer.sys.stdin, 'isatty', return_value=True), \
+                    patch('builtins.input', side_effect=AssertionError('unexpected prompt')):
+                args = installer.parse_args(['--non-interactive', '--yes', '--mode', mode,
+                    '--hostname', 'gateway.example', '--no-sample-users', *provider_flags])
+                self.assertTrue(args.non_interactive)
+                self.assertFalse(args.sample_users)
+                self.assertEqual(args.image_mode, 'published')
+
+    def test_explicit_headless_rejects_incomplete_inputs_without_prompting(self):
+        base = ['--non-interactive', '--hostname', 'gateway.example']
+        cases = [
+            ['--mode', 'mock'],  # final confirmation cannot be prompted
+            ['--yes'],  # provider missing
+            ['--yes', '--provider', 'openai'],  # credential file missing
+            ['--yes', '--provider', 'external', '--external-key-file', '/root/provider.key'],
+            ['--yes', '--provider', 'external', '--external-api', 'both',
+             '--external-key-file', '/root/provider.key', '--external-openai-url', 'https://provider.example/v1'],
+        ]
+        with patch.object(installer.sys.stdin, 'isatty', return_value=True), \
+                patch('builtins.input', side_effect=AssertionError('unexpected prompt')), \
+                contextlib.redirect_stderr(io.StringIO()):
+            for extra in cases:
+                with self.subTest(extra=extra), self.assertRaises(SystemExit):
+                    installer.parse_args(base + extra)
+            with self.assertRaises(SystemExit):
+                installer.parse_args(['--non-interactive', '--yes', '--mode', 'mock'])
+
+    def test_headless_plan_needs_no_confirmation_or_credential_access(self):
+        with patch.object(installer.sys.stdin, 'isatty', return_value=True), \
+                patch('builtins.input', side_effect=AssertionError('unexpected prompt')), \
+                patch.object(installer, 'preflight', side_effect=AssertionError('host access')), \
+                patch.object(installer, 'provider_module', side_effect=AssertionError('credentials access')), \
+                contextlib.redirect_stdout(io.StringIO()):
+            args = installer.parse_args(['--non-interactive', '--plan', '--hostname',
+                                         'gateway.example', '--provider', 'openai'])
+            installer.install(args)
+            self.assertTrue(args.plan)
+            self.assertFalse(args.yes)
+
     def test_bootstrap_failure_stops_before_marker_and_explains_recovery(self):
         source = (ROOT / 'scripts/pricetag/start').read_text()
         start = source.index('  if ! python3 "${SCRIPT_DIR}/metering_admin.py"')

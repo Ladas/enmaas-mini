@@ -8,6 +8,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
 from unified_config import active, catalog, render as unified, validate
 
+OIDC = ['/oauth/login', '/oauth/callback']
 INFERENCE = ['/v1/chat/completions', '/v1/responses', '/v1/messages']
 DASHBOARD = ['/', '/login', '/logout', '/dashboard', '/admin', '/manager', '/me', '/welcome', '/account',
              '/management', '/admin/impersonate', '/me/keys', '/whoami', '/api/v1/whoami', '/api/v1/pricing',
@@ -23,6 +24,15 @@ DASHBOARD = ['/', '/login', '/logout', '/dashboard', '/admin', '/manager', '/me'
              '/api/v1/admin/pricing/refresh', '/api/v1/admin/pricing/reprice', '/api/v1/org/scope',
              '/api/v1/org/usage', '/api/v1/org/person', '/api/v1/org/charts']
 DASHBOARD_PREFIXES = ['/api/v1/management/', '/me/keys/', '/api/v1/me/keys/', '/api/v1/admin/partner-users/', '/api/v1/admin/pricing/reprice/']
+
+
+def inference_guards(api):
+    """Keep inference on metered HTTP and request Chat streaming usage."""
+    filters = [{'filter': 'reject_upgrade', 'status': 400, 'protocols': []}]
+    if api == 'openai':
+        filters.append({'filter': 'stream_usage_inject', 'max_body_bytes': 10485760,
+                        'conditions': [{'when': {'methods': ['POST'], 'path': '/v1/chat/completions'}}]})
+    return filters
 
 
 def render(original, models, origins=None):
@@ -78,9 +88,10 @@ def render(original, models, origins=None):
             load_balancer = next((i for i, item in enumerate(filters)
                                   if item['filter'] == 'load_balancer'), len(filters))
             filters.insert(load_balancer, request_headers)
+        filters[2:2] = inference_guards(api)
         chain['filters'] = filters
 
-    allowed = [{'path': p} for p in DASHBOARD] + [{'path_prefix': p} for p in DASHBOARD_PREFIXES] + [
+    allowed = [{'path': p, 'methods': ['GET']} for p in OIDC] + [{'path': p} for p in DASHBOARD] + [{'path_prefix': p} for p in DASHBOARD_PREFIXES] + [
         {'path': '/v1/models', 'methods': ['GET']}] + [
         {'path': p, 'methods': ['POST']} for p in [*INFERENCE, '/v1/messages/count_tokens']]
     # The public listener routes protocol paths to different private chains so
@@ -88,6 +99,7 @@ def render(original, models, origins=None):
     # separate private chains. The public model catalog contains no secrets.
     public = [
         {'filter': 'request_id'},
+        {'filter': 'reject_upgrade', 'status': 400, 'protocols': []},
         {'filter': 'static_response', 'status': 404, 'body': 'Route not available',
          'conditions': [{'unless': match} for match in allowed]},
         {'filter': 'rate_limit', 'mode': 'global', 'rate': 30, 'burst': 120},
@@ -99,7 +111,7 @@ def render(original, models, origins=None):
              for p in ('/v1/messages', '/v1/messages/count_tokens')] +
             [{'path': p, 'cluster': 'authenticated-openai'}
              for p in ('/v1/responses', '/v1/chat/completions')] +
-            [{'path': p, 'cluster': 'dashboard'} for p in DASHBOARD] +
+            [{'path': p, 'cluster': 'dashboard'} for p in [*DASHBOARD, *OIDC]] +
             [{'path_prefix': p, 'cluster': 'dashboard'} for p in DASHBOARD_PREFIXES]},
         {'filter': 'load_balancer', 'clusters': [
             {'name': 'authenticated-openai', 'endpoints': ['127.0.0.1:18082']},

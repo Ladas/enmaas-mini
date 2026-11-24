@@ -198,6 +198,8 @@ def parse_args(argv=None):
     p.add_argument('--pricetag-messages-url', help=argparse.SUPPRESS)
     p.add_argument('--pricetag-openai-url', help=argparse.SUPPRESS)
     p.add_argument('--monthly-usd', type=int, default=5, help='default per-user monthly USD allowance; default 5')
+    p.add_argument('--tls-bundle', type=Path, help='pre-issued server.pem, server.key and ca.pem')
+    p.add_argument('--oidc-config', type=Path, help='private JSON file for external OIDC login')
     p.add_argument('--maas-database-url-file', type=Path,
                    help='private URL file for the existing external maas database')
     p.add_argument('--metering-database-url-file', type=Path,
@@ -207,6 +209,8 @@ def parse_args(argv=None):
     p.add_argument('--sample-users', action=argparse.BooleanOptionalAction, default=None,
                    help='create Alice and Bob in addition to the required administrator')
     p.add_argument('--yes', action='store_true', help='skip final confirmation, not missing setup prompts')
+    p.add_argument('--non-interactive', action='store_true',
+                   help='never prompt; require complete options and protected credential files')
     p.add_argument('--plan', action='store_true', help='print stages without credentials, discovery or host changes')
     p.add_argument('--image-mode', choices=('source', 'published'), help='build source or pull digest-pinned images')
     p.add_argument('--maas-image', help='published MaaS image, including @sha256 digest')
@@ -218,7 +222,9 @@ def parse_args(argv=None):
     metering_source.add_argument('--metering-revision', help='full PriceTag source SHA to build or verify')
     metering_source.add_argument('--metering-branch', help='source mode: branch in the PriceTag source repository')
     args = p.parse_args(argv)
-    interactive = sys.stdin.isatty() and not args.plan
+    interactive = sys.stdin.isatty() and not args.plan and not args.non_interactive
+    if args.non_interactive and not args.plan and not args.yes:
+        p.error('--non-interactive requires --yes')
     if not args.hostname and interactive:
         args.hostname = input('Gateway public IPv4 or DNS name: ').strip()
     if not args.hostname or not valid_hostname(args.hostname):
@@ -273,7 +279,7 @@ def parse_args(argv=None):
         p.error('--external-api requires --provider external')
     if args.pricetag_key_file and not (args.pricetag_messages_url or args.pricetag_openai_url):
         p.error('--pricetag-key-file requires a PriceTag URL')
-    if not args.plan and not sys.stdin.isatty() and args.mode == 'real':
+    if not args.plan and (args.non_interactive or not sys.stdin.isatty()) and args.mode == 'real':
         if not args.yes:
             p.error('noninteractive installation requires --yes')
         if any(not getattr(args, provider + '_key_file') for provider in args.provider):
@@ -437,6 +443,14 @@ def install(args):
                                             args.external_database_ca_file)
         except (OSError, ValueError) as error:
             raise ValueError(str(error)) from None
+    if args.oidc_config is not None:
+        if args.metering_revision == 'ce9c6c51b8dff178637003945b517255c54fc853':
+            raise ValueError('This metering revision has no OIDC handler; select the tested source-build candidate')
+        from oidc_config import load as load_oidc
+        load_oidc(args.oidc_config, f'https://{args.hostname}:8443')
+    if args.tls_bundle is not None:
+        from tls_bundle import validate as validate_tls_bundle
+        validate_tls_bundle(args.tls_bundle, args.hostname)
     preflight(args.mode)
     helper = provider_module()
     stage(1, 'Validate provider setup')
@@ -478,6 +492,10 @@ def install(args):
                     '--metering-database-url-file', args.metering_database_url_file]
         if args.external_database_ca_file is not None:
             command += ['--external-database-ca-file', args.external_database_ca_file]
+    if args.oidc_config is not None:
+        command += ['--oidc-config', args.oidc_config]
+    if args.tls_bundle is not None:
+        command += ['--tls-bundle', args.tls_bundle]
     if not args.sample_users:
         command += ['--no-sample-users']
     if args.mode == 'mock':

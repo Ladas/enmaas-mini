@@ -49,6 +49,8 @@ nav:
   - Start here:
       - Introduction: docs/README.md
       - Architecture overview: docs/quickstarts/architecture-walkthrough/README.md
+      - EnMaaS vs Mini (production-readiness): docs/architecture/enmaas-vs-mini-production-readiness.md
+      - EnMaaS Mini flow visualizer: docs/architecture/enmaas-mini-flow.html
   - Deployment:
       - Deployment methods: docs/deployment-methods.md
       - Common gateway configuration:
@@ -99,6 +101,7 @@ nav:
       - Mock provider tests: docs/testing/mocked-provider.md
       - AWS VM runbook: docs/testing/aws.md
       - AWS operations: docs/testing/aws-operations.md
+      - Keycloak test host: docs/testing/external-services/keycloak-rhel.md
 
 extra_css:
   - assets/stylesheets/redhat.css
