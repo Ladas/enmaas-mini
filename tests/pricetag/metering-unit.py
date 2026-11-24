@@ -6,7 +6,7 @@ import subprocess
 import time
 import uuid
 
-POSTGRES = 'docker.io/library/postgres@sha256:996e9dc583ba9f0265a2c75547a9c95fb22c251e394749cab205a0a00e1856a1'
+POSTGRES = 'registry.access.redhat.com/hi/postgresql@sha256:9cca24a10b7d319cf44aa811d3eeda957e14e0b6350e099ccb99f63de005e614'
 GOLANG = 'docker.io/library/golang@sha256:0f063af2d465d8dcae54cce04278ada488b96f77b42449c8d071e47d016cc65a'
 
 
