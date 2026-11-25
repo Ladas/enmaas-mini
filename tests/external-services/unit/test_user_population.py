@@ -6,7 +6,7 @@ import os
 import fcntl
 import unittest
 import uuid
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 spec=importlib.util.spec_from_file_location('population',(Path(__file__).resolve().parents[1] / 'user-population.py'))
 pop=importlib.util.module_from_spec(spec);spec.loader.exec_module(pop)
@@ -111,6 +111,30 @@ class Population(unittest.TestCase):
             pop.load(root,'population.json')
             base.chmod(0o700)
             pop.load(root,'population.json')
+
+    def test_symlink_ancestor_is_rejected_before_writing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base=Path(tmp);target=base/'target';target.mkdir(mode=0o700)
+            root=target/'users';pop.initialize(root,1)
+            alias=base/'redirect';alias.symlink_to(target,target_is_directory=True)
+            with self.assertRaises(OSError):
+                pop.save(alias/'users','00001.json',{'password':'synthetic-sentinel'})
+            self.assertFalse((root/'00001.json').exists())
+            self.assertFalse(list(root.glob('.population-*')))
+
+    def test_save_stays_in_validated_directory_when_path_is_replaced(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base=Path(tmp);root=base/'users';pop.initialize(root,1)
+            moved=base/'moved';replacement=base/'replacement';replacement.mkdir(mode=0o700)
+            original=pop.secure_dir
+            def replace_after_validation(path):
+                fd=original(path)
+                root.rename(moved);root.symlink_to(replacement,target_is_directory=True)
+                return fd
+            with patch.object(pop,'secure_dir',side_effect=replace_after_validation):
+                pop.save(root,'00001.json',{'state':'prepared'},exclusive=True)
+            self.assertTrue((moved/'00001.json').is_file())
+            self.assertFalse((replacement/'00001.json').exists())
 
     def test_export_contains_only_identity_profiles_not_credentials(self):
         with tempfile.TemporaryDirectory() as tmp:

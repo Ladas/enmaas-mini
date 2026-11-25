@@ -19,7 +19,9 @@ def secure_dir(root):
     directory=os.open(path.anchor,os.O_RDONLY|os.O_DIRECTORY)
     try:
         for component in path.parts[1:-1]:
-            child=os.open(component,os.O_RDONLY|os.O_DIRECTORY,dir_fd=directory)
+            # Validate every component without following redirects, not only the
+            # leaf. All later file operations remain anchored to this descriptor.
+            child=os.open(component,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=directory)
             os.close(directory);directory=child
             info=os.fstat(directory)
             if info.st_uid not in (0,os.getuid()) or info.st_mode&0o022 and not info.st_mode&stat.S_ISVTX:

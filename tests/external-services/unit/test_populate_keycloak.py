@@ -86,5 +86,22 @@ class Transport(unittest.TestCase):
             result=subprocess.run([sys.executable,*args],capture_output=True,text=True)
             self.assertNotEqual(result.returncode,0);self.assertEqual(result.stdout,'')
 
+    def test_export_preflight_fails_before_population_mutations(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);existing=root/'profiles.json';existing.write_text('keep')
+            redirected=root/'redirected';redirected.symlink_to(root,target_is_directory=True)
+            for export in (existing,redirected/'new.json'):
+                with self.subTest(export=export), \
+                        patch('sys.argv',[str(Path(p.__file__)),'--yes','--count','2',
+                            '--state',str(root/'users'),'--export',str(export)]), \
+                        patch.object(p.os,'geteuid',return_value=0), \
+                        patch.object(p.private,'read',return_value={'bootstrap_admin':'test-only'}), \
+                        patch.object(p,'Issuer'),patch.object(p.population,'initialize') as initialize, \
+                        patch.object(p.population,'run') as run,self.assertRaises(OSError):
+                    p.main()
+                initialize.assert_not_called();run.assert_not_called()
+            self.assertEqual(existing.read_text(),'keep')
+            self.assertFalse((root/'users').exists())
+
 
 if __name__=='__main__':unittest.main()
