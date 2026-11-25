@@ -69,6 +69,8 @@ jobs:
           exit 1
       - name: Qualify isolated PostgreSQL runtime
         run: sudo python3 tests/pricetag/database-smoke.py
+      - name: Validate external database connections and permissions
+        run: sudo python3 tests/pricetag/external-database.py
       - name: Build pinned application sources
         shell: bash
         run: |

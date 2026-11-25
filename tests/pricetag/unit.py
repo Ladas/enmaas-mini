@@ -382,6 +382,18 @@ class PreparationTest(unittest.TestCase):
         self.assertIn('--pull=never', command)
         self.assertTrue(command[command.index('--name') + 1].startswith('pricetag-external-check-'))
 
+    def test_external_database_client_reads_protected_password_as_service_group(self):
+        # The image's postgres account cannot read the 0640 root:service-group
+        # password file; the ephemeral client must select the mapped service
+        # group instead of inheriting the image default group, and must never
+        # reach the file through DAC-override capabilities.
+        with patch.object(external_database, 'service_prefix', return_value=['sudo']):
+            command = external_database.client_command(Path('/etc/praxis-pricetag/external-maas-db.env'))
+        self.assertIn('--user', command)
+        self.assertEqual(command[command.index('--user') + 1], '999:0')
+        self.assertIn('--cap-drop=DAC_OVERRIDE', command)
+        self.assertIn('--cap-drop=DAC_READ_SEARCH', command)
+
     def test_external_database_client_runs_outside_inaccessible_checkout(self):
         result = type('Result', (), {'stdout': '1\n'})()
         with tempfile.TemporaryDirectory() as directory:

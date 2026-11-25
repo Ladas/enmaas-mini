@@ -49,6 +49,7 @@ def main():
              '-subj', '/CN=external-db.test', '-addext', 'subjectAltName=DNS:external-db.test',
              '-keyout', key, '-out', certificate])
         try:
+            protected = []
             run(PODMAN + ['network', 'create', network])
             run(PODMAN + ['run', '-d', '--name', container, '--network', network,
                  '--network-alias', 'external-db.test', '--env', 'POSTGRES_PASSWORD=' + password,
@@ -82,20 +83,73 @@ def main():
                                                      for name, value in environment.items()))
                 password_file = certificates / f'{role}.password'
                 password_file.write_text(external_password_file(role_password))
+                original = password_file.stat()
+                # Deployment permission shape: the file is owned by an
+                # identity the client never runs as and is group-readable
+                # only (0640). Rootful runs chown directly (group 0 is what
+                # container GID 0 maps to without a user namespace); rootless
+                # runs chown inside the user namespace, which leaves the
+                # group as the invoking user's primary group (container
+                # GID 0).
+                if os.geteuid() == 0:
+                    os.chown(password_file, 12345, 0)
+                    password_file.chmod(0o640)
+                    protected.append((password_file, original.st_uid, original.st_gid))
+                else:
+                    password_file.chmod(0o640)
+                    run(PODMAN + ['unshare', 'chown', '500:0', password_file])
+                    protected.append((password_file, original.st_uid, original.st_gid))
+                    # podman unshare and podman run share the invoking
+                    # user's default namespace; verify the group mapping the
+                    # client relies on instead of assuming it.
+                    if password_file.stat().st_gid != original.st_gid:
+                        raise RuntimeError('user namespace did not keep the invoking group')
                 shell_command = (
                     '. /run/secrets/external-db-password\n'
                     'exec psql -X -qAt -v ON_ERROR_STOP=1 -c '
                     + shlex.quote("SELECT current_user || ':' || current_database()"))
+                # The deployment file's owner (host root) is unmapped in the
+                # service namespace, so capabilities cannot bypass its mode
+                # bits there. The test's owner is visible to the container,
+                # so drop the DAC-override capabilities to make the group
+                # match load-bearing here as well.
+                client = ['--rm', '--network', network, '--env-file', environment_file,
+                          '--cap-drop=DAC_OVERRIDE', '--cap-drop=DAC_READ_SEARCH',
+                          '-v', f'{certificate}:/etc/pricetag-external-ca.crt:ro,Z',
+                          '-v', f'{password_file}:/run/secrets/external-db-password:ro,Z']
+                # The image's default postgres account (999:999) must not be
+                # able to read the protected password file; probe with a
+                # direct read so only file permissions decide the outcome.
+                if subprocess.run(PODMAN + ['run', *client, POSTGRES, 'cat',
+                                            '/run/secrets/external-db-password'],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                                  ).returncode == 0:
+                    raise RuntimeError('image default user read the protected password file')
+                # Mirror scripts/pricetag/external-database: the ephemeral
+                # client keeps the image's postgres UID and selects the
+                # mapped service group, reading the file through the group
+                # mapping with no capabilities.
                 result = subprocess.run(
-                    PODMAN + ['run', '--rm', '--network', network, '--env-file', environment_file,
-                     '-v', f'{certificate}:/etc/pricetag-external-ca.crt:ro,Z',
-                     '-v', f'{password_file}:/run/secrets/external-db-password:ro,Z',
-                     POSTGRES, 'sh', '-c', shell_command],
+                    PODMAN + ['run', '--user', '999:0', *client, POSTGRES, 'sh', '-c', shell_command],
                     check=True, text=True, stdout=subprocess.PIPE).stdout.strip()
                 if result != f'{role}:{role}':
                     raise RuntimeError(f'unexpected connection identity: {result}')
-            print('PASS: external MaaS and metering URLs connected over verified TLS')
+            print('PASS: external MaaS and metering URLs connected over verified TLS '
+                  'with deployment-shaped password permissions')
         finally:
+            # Restore the original owner and group so TemporaryDirectory
+            # cleanup never depends on foreign-owned files; best-effort so a
+            # restore problem cannot mask the actual test result.
+            for password_file, uid, gid in protected:
+                try:
+                    if os.geteuid() == 0:
+                        os.chown(password_file, uid, gid)
+                    else:
+                        # Namespace 0:0 is the saved invoking-user identity.
+                        subprocess.run(PODMAN + ['unshare', 'chown', '0:0', password_file],
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except OSError:
+                    pass
             subprocess.run(PODMAN + ['rm', '-f', container],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             subprocess.run(PODMAN + ['network', 'rm', network],
