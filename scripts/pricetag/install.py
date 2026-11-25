@@ -213,6 +213,8 @@ def parse_args(argv=None):
                    help='never prompt; require complete options and protected credential files')
     p.add_argument('--plan', action='store_true', help='print stages without credentials, discovery or host changes')
     p.add_argument('--image-mode', choices=('source', 'published'), help='build source or pull digest-pinned images')
+    p.add_argument('--praxis-image', help='Praxis image with @sha256 digest; requires --praxis-revision')
+    p.add_argument('--praxis-revision', help='expected full Git SHA in the selected Praxis image label')
     p.add_argument('--maas-image', help='published MaaS image, including @sha256 digest')
     p.add_argument('--metering-image', help='published PriceTag image, including @sha256 digest')
     maas_source = p.add_mutually_exclusive_group()
@@ -222,6 +224,14 @@ def parse_args(argv=None):
     metering_source.add_argument('--metering-revision', help='full PriceTag source SHA to build or verify')
     metering_source.add_argument('--metering-branch', help='source mode: branch in the PriceTag source repository')
     args = p.parse_args(argv)
+    if (args.praxis_image is None) != (args.praxis_revision is None):
+        p.error('provide both --praxis-image and --praxis-revision')
+    if args.praxis_image is None:
+        args.praxis_image, args.praxis_revision = PRAXIS_IMAGE, PRAXIS_REVISION
+    if not re.fullmatch(r'[a-z0-9][a-z0-9.:-]*/[a-z0-9_./-]+@sha256:[0-9a-f]{64}', args.praxis_image):
+        p.error('--praxis-image must include a registry/repository and sha256 digest')
+    if not re.fullmatch(r'[0-9a-f]{40}', args.praxis_revision):
+        p.error('--praxis-revision must be a full lowercase Git commit SHA')
     interactive = sys.stdin.isatty() and not args.plan and not args.non_interactive
     if args.non_interactive and not args.plan and not args.yes:
         p.error('--non-interactive requires --yes')
@@ -391,10 +401,10 @@ def acquire_images(args, arch):
         for component, image in zip(('MaaS', 'PriceTag metering'), images):
             print(f'  {component} image: {image}', flush=True)
             run(['podman', 'pull', image], label='Pulling ' + component)
-    print('  Praxis image: ' + PRAXIS_IMAGE, flush=True)
-    run(['podman', 'pull', PRAXIS_IMAGE], label='Pulling Praxis')
-    for image, expected in zip((PRAXIS_IMAGE, *images),
-                               (PRAXIS_REVISION, args.maas_revision, args.metering_revision)):
+    print('  Praxis image: ' + args.praxis_image, flush=True)
+    run(['podman', 'pull', args.praxis_image], label='Pulling Praxis')
+    for image, expected in zip((args.praxis_image, *images),
+                               (args.praxis_revision, args.maas_revision, args.metering_revision)):
         revision = run(['podman', 'image', 'inspect', image, '--format',
                         '{{index .Labels "org.opencontainers.image.revision"}}'], True)
         if revision != expected:
@@ -417,7 +427,7 @@ def install(args):
     print('  Providers  ' + ('Mock providers (benchmark)' if args.mode == 'mock' else
                             ', '.join(providers[name] for name in args.provider)))
     print(f'  Images     {args.image_mode}')
-    print('  Praxis     ' + PRAXIS_IMAGE)
+    print('  Praxis     ' + args.praxis_image)
     print('  PostgreSQL ' + ('external (pre-provisioned)' if args.maas_database_url_file else POSTGRES))
     if args.image_mode == 'published':
         print('  MaaS       ' + args.maas_image)
@@ -479,7 +489,7 @@ def install(args):
     application_images = acquire_images(args, arch)
     stage(4, 'Import images into the service account')
     ids = [import_image(image, prefix, component) for component, image in
-           zip(('Praxis', 'MaaS', 'PriceTag metering'), (PRAXIS_IMAGE, *application_images))]
+           zip(('Praxis', 'MaaS', 'PriceTag metering'), (args.praxis_image, *application_images))]
     stage(5, 'Configure providers, TLS and budgets')
     for name, settings, key in prepared:
         helper.save_provider(name, settings, key)
