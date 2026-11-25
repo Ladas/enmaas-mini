@@ -21,8 +21,8 @@ MAAS_COMMIT = '6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d'
 # Published image provenance remains separate from the source-build candidate.
 METERING_COMMIT = 'ce9c6c51b8dff178637003945b517255c54fc853'
 # The metering source line is the standalone-management branch of
-# redhat-et/pricetag-metering PR #149 (redhat-et main plus the standalone
-# management layer). Follow main once that pull request merges.
+# redhat-et/pricetag-metering; PR #149 merged, and main also carries the
+# pinned revision. The branch remains the reviewed integration line.
 SOURCE_METERING_COMMIT = 'e4ba826d5b1469d7f1167428792e498ffb4d92c7'
 MAAS_REPO = 'https://github.com/Ladas/models-as-a-service.git'
 MAAS_BRANCH = 'feat/standalone-runtime-minimal'
