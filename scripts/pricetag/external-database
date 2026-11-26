@@ -2,6 +2,7 @@
 """Validate connections to prepared external PostgreSQL databases without logging credentials."""
 import argparse
 from pathlib import Path
+import platform
 import pwd
 import re
 import shlex
@@ -9,7 +10,15 @@ import subprocess
 import sys
 import uuid
 
-POSTGRES = 'docker.io/library/postgres@sha256:996e9dc583ba9f0265a2c75547a9c95fb22c251e394749cab205a0a00e1856a1'
+# 17.12-fips pinned per architecture: registry.access.redhat.com fails
+# manifest-list pulls with unauthorized blob errors on older Podman (CI's
+# Ubuntu 24.04 ships 4.9.3). 'arm64' mirrors 'aarch64' for macOS hosts.
+POSTGRES_ARCHES = {
+    'x86_64': 'registry.access.redhat.com/hi/postgresql@sha256:52e9435300b2fe89f8534e03e86d54179b86a1a4ca29a9c4bd426b000958a4b9',
+    'aarch64': 'registry.access.redhat.com/hi/postgresql@sha256:f097ed322c237e6f955ce24fbe503a4cd46b58ce9cde1677aca2586ebd08bf2c',
+    'arm64': 'registry.access.redhat.com/hi/postgresql@sha256:f097ed322c237e6f955ce24fbe503a4cd46b58ce9cde1677aca2586ebd08bf2c',
+}
+POSTGRES = POSTGRES_ARCHES[platform.machine()]
 DEPLOY = Path('/etc/praxis-pricetag')
 CHECK_TIMEOUT_GRACE = 10
 
@@ -25,8 +34,18 @@ def client_command(environment_file, command='SELECT 1', container_name=None):
     """Build a credential-isolated Podman command for one psql query."""
     password_file = environment_file.with_suffix('.password')
     container_name = container_name or 'pricetag-external-check-' + uuid.uuid4().hex[:12]
+    # The pinned image defaults to the postgres account (999:999), which
+    # cannot read the 0640 root:service-group password file. That group is
+    # the service account's primary group -- the exact group rootless Podman
+    # maps to container GID 0 -- so the ephemeral client keeps the image's
+    # postgres UID and selects the service group (999:0). It reads the file
+    # through that group mapping; the DAC-override drops keep the read from
+    # ever depending on capabilities instead. The database server keeps the
+    # image default user.
     arguments = service_prefix() + ['podman', 'run', '--rm', '--pull=never',
                                     '--name', container_name,
+                                    '--user', '999:0',
+                                    '--cap-drop=DAC_OVERRIDE', '--cap-drop=DAC_READ_SEARCH',
                                     '--network', 'pricetag-private',
                                     '--env-file', environment_file]
     if (DEPLOY / 'external-ca.crt').is_file():

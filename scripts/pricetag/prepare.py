@@ -5,6 +5,7 @@ import copy
 import ipaddress
 import json
 import os
+import platform
 import shlex
 from pathlib import Path
 import pwd
@@ -20,7 +21,15 @@ from oidc_config import load as load_oidc
 from tls_bundle import validate as validate_tls_bundle
 
 ROOT = Path(__file__).resolve().parents[2]
-POSTGRES = 'docker.io/library/postgres@sha256:996e9dc583ba9f0265a2c75547a9c95fb22c251e394749cab205a0a00e1856a1'
+# 17.12-fips pinned per architecture: registry.access.redhat.com fails
+# manifest-list pulls with unauthorized blob errors on older Podman (CI's
+# Ubuntu 24.04 ships 4.9.3). 'arm64' mirrors 'aarch64' for macOS hosts.
+POSTGRES_ARCHES = {
+    'x86_64': 'registry.access.redhat.com/hi/postgresql@sha256:52e9435300b2fe89f8534e03e86d54179b86a1a4ca29a9c4bd426b000958a4b9',
+    'aarch64': 'registry.access.redhat.com/hi/postgresql@sha256:f097ed322c237e6f955ce24fbe503a4cd46b58ce9cde1677aca2586ebd08bf2c',
+    'arm64': 'registry.access.redhat.com/hi/postgresql@sha256:f097ed322c237e6f955ce24fbe503a4cd46b58ce9cde1677aca2586ebd08bf2c',
+}
+POSTGRES = POSTGRES_ARCHES[platform.machine()]
 PYTHON = 'docker.io/library/python@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7'
 EXTERNAL_DATABASE_QUERY_KEYS = {'sslmode', 'hostaddr', 'connect_timeout', 'application_name'}
 EXTERNAL_DATABASE_TIMEOUT = 10
@@ -422,7 +431,10 @@ def main():
         container('pricetag-db', 'MaaS and PriceTag PostgreSQL', '',
             f'Image={POSTGRES}\nEnvironmentFile={args.directory}/postgres.env\n'
             'Volume=pricetag-db.volume:/var/lib/postgresql/data\n'
-            'Tmpfs=/var/run/postgresql:rw,mode=3775\nTmpfs=/tmp\n'
+            # Sticky world-writable tmpfs: runtimes mount tmpfs root-owned, so the
+            # socket directory must stay writable for images whose entrypoint runs
+            # as the postgres user and cannot chown it.
+            'Tmpfs=/var/run/postgresql:rw,mode=1777\nTmpfs=/tmp\n'
             'HealthCmd=pg_isready -U postgres -d postgres\nHealthInterval=10s\n' + common, '1G')
     container('pricetag-maas', 'MaaS standalone key API', application_dependency,
         f'Image={args.maas_image}\nPull=never\nNetworkAlias=pricetag-maas\n'

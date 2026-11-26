@@ -58,8 +58,25 @@ jobs:
           sudo apparmor_parser --replace tests/pricetag/ci.apparmor
           sudo install -d -m 0755 /etc/containers/containers.conf.d
           printf '[containers]\napparmor_profile="pricetag-demo-ci"\n' | sudo tee /etc/containers/containers.conf.d/99-pricetag-demo.conf >/dev/null
+      - name: Pre-pull the pinned PostgreSQL image
+        run: |
+          # registry.access.redhat.com intermittently answers anonymous blob
+          # fetches with unauthorized errors from CI egress; retry so a
+          # transient rejection cannot fail the job (re-running also works).
+          image=$(python3 -c "import sys; sys.path.insert(0, 'scripts/pricetag'); import prepare; print(prepare.POSTGRES)")
+          for attempt in 1 2 3 4 5; do
+            if sudo timeout 300 podman pull "$image"; then
+              exit 0
+            fi
+            echo "::warning::pull attempt $attempt failed for $image" >&2
+            sleep $((attempt * 60))
+          done
+          echo "::error::could not pull $image after retries" >&2
+          exit 1
       - name: Qualify isolated PostgreSQL runtime
         run: sudo python3 tests/pricetag/database-smoke.py
+      - name: Validate external database connections and permissions
+        run: sudo python3 tests/pricetag/external-database.py
       - name: Build pinned application sources
         shell: bash
         env:
