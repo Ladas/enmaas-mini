@@ -112,6 +112,7 @@ nav:
       - Deployment DNS: docs/testing/external-services/dns.md
       - External RDS: docs/testing/external-services/rds.md
       - Private peer network: docs/testing/external-services/network.md
+      - Local stack qualification: docs/testing/external-services/local-podman.md
 
 extra_css:
   - assets/stylesheets/redhat.css

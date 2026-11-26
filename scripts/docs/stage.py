@@ -48,6 +48,7 @@ PUBLISHED_TESTING_DOCS = frozenset(
         "docs/testing/external-services/dns.md",
         "docs/testing/external-services/rds.md",
         "docs/testing/external-services/network.md",
+        "docs/testing/external-services/local-podman.md",
     )
 )
 EXCLUDED_SOURCES: tuple[Path, ...] = ()
